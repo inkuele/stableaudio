@@ -1,0 +1,56 @@
+1. add deadsnakes
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt update
+
+2. install python3.8
+sudo apt install python3.8-full
+
+3. create the virtualenv
+$ python3.8 -m venv venv
+
+4. install stable-audio-tools
+pip3.8 install stable-audio-tools
+
+5. fix error with python-pesq
+git clone https://github.com/vBaiCai/python-pesq.git
+cd python-pesq
+
+edit the setup.py:
+try:
+    __builtins__.__NUMPY_SETUP__ = False
+except AttributeError:
+    print("Cannot set '__builtins__.__NUMPY_SETUP__ = False' This is not needed if numpy is already installed.")
+
+
+with
+
+try:
+    if isinstance(__builtins__, dict):
+        __builtins__['__NUMPY_SETUP__'] = False
+    else:
+        __builtins__.__NUMPY_SETUP__ = False
+except Exception as e:
+    print(f"Warning: Could not set '__NUMPY_SETUP__ = False'. Reason: {e}")
+
+run:
+sudo apt install python3.8-dev
+pip install .
+
+6. run again
+pip3.8 install stable-audio-tools
+
+it might take some time at this line:
+Collecting fsspec[http]>2021.06.0 (from pytorch_lightning==2.1.0->stable-audio-tools)
+  Using cached fsspec-2023.12.0-py3-none-any.whl.metadata (6.8 kB)
+
+7. run
+pip install fastapi==0.103.2 starlette==0.27.0 gradio==3.43.0
+and again
+pip3.8 install stable-audio-tools
+
+8. login into huggingface
+huggingface-cli login
+
+9. run the test script
+python3.8 stableaudio_test.py
+
