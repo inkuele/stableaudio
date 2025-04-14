@@ -6,8 +6,15 @@ import gradio as gr
 from stable_audio_tools import get_pretrained_model
 from stable_audio_tools.inference.generation import generate_diffusion_cond
 
+
+if torch.backends.mps.is_available():
+    device = "mps"
+elif torch.cuda.is_available():
+    device = "cuda"
+else:
+    device = "cpu"
+
 # Load model
-device = "cuda" if torch.cuda.is_available() else "cpu"
 model, model_config = get_pretrained_model("stabilityai/stable-audio-open-1.0")
 model = model.to(device)
 sample_rate = model_config["sample_rate"]

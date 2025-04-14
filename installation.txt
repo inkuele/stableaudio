@@ -20,6 +20,7 @@ source venv/bin/activate
 pip3.8 install stable-audio-tools
 
 5. fix error with python-pesq
+cd ..
 git clone https://github.com/vBaiCai/python-pesq.git
 cd python-pesq
 
@@ -62,3 +63,10 @@ huggingface-cli login
 9. run the test script
 python3.8 stableaudio_test.py
 
+10. only for Mac:
+if you get an error about the soundfile library, do the following:
+brew install libsndfile
+
+and then
+pip uninstall soundfile
+pip install soundfile
