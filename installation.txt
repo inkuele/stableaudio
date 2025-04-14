@@ -3,10 +3,18 @@ sudo add-apt-repository ppa:deadsnakes/ppa
 sudo apt update
 
 2. install python3.8
+Linux:
 sudo apt install python3.8-full
 
+Mac:
+pyenv install 3.8.10
+cd ~/my-project
+pyenv local 3.8.10
+
+
 3. create the virtualenv
-$ python3.8 -m venv venv
+python3.8 -m venv venv
+source venv/bin/activate
 
 4. install stable-audio-tools
 pip3.8 install stable-audio-tools
