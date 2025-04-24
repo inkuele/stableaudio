@@ -7,11 +7,11 @@ MODEL_DIR = "./models"
 # List of models to download
 models = [
     "stabilityai/stable-audio-open-1.0",
-    "PsiPi/audio",
-    "RoyalCities/RC_Infinite_Pianos",
-    "RoyalCities/Vocal_Textures_Main",
-    "Nekochu/stable-audio-open-1.0-Music",
-    "santifiorino/SAO-Instrumental-Finetune",
+#    "PsiPi/audio",
+#    "RoyalCities/RC_Infinite_Pianos",
+#    "RoyalCities/Vocal_Textures_Main",
+#    "Nekochu/stable-audio-open-1.0-Music",
+#    "santifiorino/SAO-Instrumental-Finetune",
     "adlb/Audialab_EDM_Elements",
     "bleepybloops/sao_vae_tuned_100k"
 ]
