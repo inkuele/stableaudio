@@ -6,7 +6,7 @@ import gradio as gr
 import time
 import os
 import zipfile
-from stable_audio_tools import load_model_from_config
+from stable_audio_tools import get_pretrained_model
 from stable_audio_tools.inference.generation import generate_diffusion_cond
 
 stop_requested = False
@@ -23,12 +23,12 @@ else:
 def load_model(local_name):
     global model, model_config, sample_rate
     local_path = os.path.join("models", local_name.replace("/", "__"))
-    model, model_config = load_model_from_config(local_path)
+    model, model_config = get_pretrained_model(local_path)
     model = model.to(device)
     sample_rate = model_config["sample_rate"]
 
 # DEFAULT MODEL
-load_model("stabilityai/stable-audio-open-1.0")
+load_model("models/stabilityai__stable-audio-open-1.0")
 
 # PRESETS
 PRESETS = {
@@ -128,14 +128,14 @@ with gr.Blocks(title="🎵 Stable Audio Generator (Offline Models)") as demo:
             model_selector = gr.Dropdown(
                 label="Select Model",
                 choices=[
-                    "stabilityai/stable-audio-open-1.0",
-                    "PsiPi/audio",
-                    "RoyalCities/RC_Infinite_Pianos",
-                    "RoyalCities/Vocal_Textures_Main",
-                    "Nekochu/stable-audio-open-1.0-Music",
-                    "santifiorino/SAO-Instrumental-Finetune",
-                    "adlb/Audialab_EDM_Elements",
-                    "bleepybloops/sao_vae_tuned_100k"
+                    "models/stabilityai__stable-audio-open-1.0",
+                    "models/PsiPi__audio",
+                    "models/RoyalCities__RC_Infinite_Pianos",
+                    "models/RoyalCities__Vocal_Textures_Main",
+                    "models/Nekochu__stable-audio-open-1.0-Music",
+                    "models/santifiorino__SAO-Instrumental-Finetune",
+                    "models/adlb__Audialab_EDM_Elements",
+                    "models/bleepybloops__sao_vae_tuned_100k"
                 ],
                 value="stabilityai/stable-audio-open-1.0",
                 interactive=True

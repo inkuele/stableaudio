@@ -52,7 +52,8 @@ it might take some time at this line:
 Collecting fsspec[http]>2021.06.0 (from pytorch_lightning==2.1.0->stable-audio-tools)
   Using cached fsspec-2023.12.0-py3-none-any.whl.metadata (6.8 kB)
 
-7. run
+7. when it fails:
+run
 pip install fastapi==0.103.2 starlette==0.27.0 gradio==3.43.0
 and again
 pip3.8 install stable-audio-tools
