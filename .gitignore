@@ -1,5 +1,9 @@
 venv/*
+build/*
+dist/*
 flagged/*
 models/*
 *.wav
+*.spec
+*.DS_Store
 
