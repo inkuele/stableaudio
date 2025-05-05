@@ -1,183 +1,87 @@
-import torch
-from einops import rearrange
-import torchaudio
-import tempfile
-import gradio as gr
-import time
 import os
-import zipfile
-from stable_audio_tools import get_pretrained_model
-from stable_audio_tools.inference.generation import generate_diffusion_cond
+import tempfile
 
-stop_requested = False
+import gradio as gr
+import torch
+import torchaudio
+from diffusers import StableAudioPipeline
 
-# DEVICE SETUP
-if torch.backends.mps.is_available():
-    device = "mps"
-elif torch.cuda.is_available():
-    device = "cuda"
-else:
-    device = "cpu"
+# device selection
+def get_device():
+    if torch.backends.mps.is_available():
+        return "mps"
+    elif torch.cuda.is_available() and torch.version.cuda is not None:
+        return "cuda"
+    else:
+        return "cpu"
 
-# LOAD MODEL LOCALLY
-def load_model(local_name):
-    global model, model_config, sample_rate
-    local_path = os.path.join("models", local_name.replace("/", "__"))
-    model, model_config = get_pretrained_model(local_path)
-    model = model.to(device)
-    sample_rate = model_config["sample_rate"]
+device = get_device()
 
-# DEFAULT MODEL
-load_model("models/stabilityai__stable-audio-open-1.0")
+# path to the specific StabilityAI Diffusers model
+def get_model_path():
+    return os.path.join("models", "stabilityai__stable-audio-open-1.0")
 
-# PRESETS
-PRESETS = {
-    "Ambient": "ambient drone, reverb tails, 60 BPM",
-    "Tech House Loop": "128 BPM tech house drum loop, dry mix",
-    "Lofi Beat": "lofi hip hop beat with vinyl crackle, 75 BPM",
-    "Glitchy IDM": "glitchy IDM with bitcrush textures, 100 BPM",
-    "Modular Synth": "modular synth arpeggio in stereo, 90 BPM"
-}
-prompt_history = []
+# load and prepare pipeline once at startup
+MODEL_PATH = get_model_path()
+pipe = StableAudioPipeline.from_pretrained(
+    MODEL_PATH,
+    torch_dtype=torch.float16 if device.startswith("cuda") else torch.float32,
+    local_files_only=True,
+)
+pipe = pipe.to(device)
 
-# GENERATE AUDIO
-def generate_audio_batch(prompts_text, duration_sec, steps, cfg_scale, sampler_type, uploaded_audio, audio_mix, progress=gr.Progress(track_tqdm=True)):
-    global stop_requested
-    stop_requested = False
+# inference function
+def infer(prompt, negative_prompt, steps, cfg_scale, seed, length_s):
+    """
+    Run the StabilityAI StableAudioPipeline loaded from MODEL_PATH.
+    """
+    generator = torch.Generator(device=device).manual_seed(int(seed))
+    output = pipe(
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        num_inference_steps=int(steps),
+        guidance_scale=float(cfg_scale),
+        generator=generator,
+        audio_length_s=int(length_s),
+    )
+    audios = output.audios  # List[np.ndarray]
+    sample_rate = output.sample_rate
 
-    prompts = [p.strip() for p in prompts_text.strip().split("\n") if p.strip()]
-    audio_paths = []
-    all_prompt_statuses = []
-    total_start_time = time.time()
+    # save results to temporary files
+    out_paths = []
+    for idx, np_audio in enumerate(audios):
+        td = tempfile.mkdtemp()
+        fn = os.path.join(td, f"output_{idx}.wav")
+        tensor = torch.from_numpy(np_audio)
+        if tensor.ndim == 1:
+            tensor = tensor.unsqueeze(0)
+        torchaudio.save(fn, tensor.cpu(), sample_rate=sample_rate)
+        out_paths.append(fn)
+    return out_paths
 
-    for i, prompt in enumerate(prompts):
-        if stop_requested:
-            all_prompt_statuses.append("🛑 Stopped by user.")
-            break
+# build Gradio interface
 
-        progress((i + 1) / len(prompts), desc=f"Generating: {prompt[:30]}...")
-        start_time = time.time()
-        sample_size = int(duration_sec * sample_rate)
+def interface():
+    with gr.Blocks() as demo:
+        gr.Markdown("## Stable Audio – Offline Local Model")
 
-        conditioning = []
-        if prompt and audio_mix < 1.0:
-            conditioning.append({
-                "prompt": prompt,
-                "seconds_start": 0,
-                "seconds_total": duration_sec,
-                "weight": 1.0 - audio_mix
-            })
-        if uploaded_audio and audio_mix > 0.0:
-            conditioning.append({
-                "audio_filepath": uploaded_audio,
-                "seconds_start": 0,
-                "seconds_total": duration_sec,
-                "weight": audio_mix
-            })
+        prompt = gr.Textbox(label="Prompt", placeholder="e.g. a calm beach at sunset")
+        negative = gr.Textbox(label="Negative Prompt", placeholder="e.g. noise, distortion")
+        steps = gr.Slider(label="Steps", minimum=1, maximum=150, value=50, step=1)
+        cfg = gr.Slider(label="CFG Scale", minimum=0.1, maximum=30, value=7.5, step=0.1)
+        seed = gr.Number(label="Seed", value=42, precision=0)
+        length = gr.Slider(label="Audio Length (s)", minimum=1, maximum=60, value=10, step=1)
 
-        output = generate_diffusion_cond(
-            model=model,
-            steps=steps,
-            cfg_scale=cfg_scale,
-            conditioning=conditioning,
-            sample_size=sample_size,
-            sigma_min=0.3,
-            sigma_max=500,
-            sampler_type=sampler_type,
-            device=device
+        generate_btn = gr.Button("Generate")
+        output_audio = gr.Audio(label="Generated Audio", type="filepath")
+
+        generate_btn.click(
+            fn=infer,
+            inputs=[prompt, negative, steps, cfg, seed, length],
+            outputs=[output_audio]
         )
 
-        output = rearrange(output, "b d n -> d (b n)")
-        output = output.to(torch.float32).div(torch.max(torch.abs(output))).clamp(-1, 1).mul(32767).to(torch.int16).cpu()
-
-        elapsed_time = time.time() - start_time
-        safe_name = "_".join(prompt.lower().split())[:25]
-        filename = f"{int(elapsed_time)}s_{safe_name}.wav"
-        out_path = os.path.join(tempfile.gettempdir(), filename)
-        torchaudio.save(out_path, output, sample_rate)
-        audio_paths.append(out_path)
-
-        total_so_far = time.time() - total_start_time
-        entry = f"{prompt}  ⏱ {elapsed_time:.1f}s | total: {total_so_far:.1f}s"
-        prompt_history.append(entry)
-        all_prompt_statuses.append(entry)
-
-    zip_path = tempfile.NamedTemporaryFile(delete=False, suffix=".zip").name
-    with zipfile.ZipFile(zip_path, "w") as zipf:
-        for path in audio_paths:
-            zipf.write(path, arcname=os.path.basename(path))
-
-    previews = audio_paths[-3:] if len(audio_paths) >= 3 else audio_paths + [None] * (3 - len(audio_paths))
-    return (*previews, zip_path, "\n".join(all_prompt_statuses))
-
-def stop_generation():
-    global stop_requested
-    stop_requested = True
-    return gr.update(value="🛑 Stop requested...")
-
-def set_preset(preset):
-    return PRESETS.get(preset, "")
-
-# GRADIO UI
-with gr.Blocks(title="🎵 Stable Audio Generator (Offline Models)") as demo:
-    gr.Markdown("## 🎵 Stable Audio Generator (Offline)")
-    gr.Markdown("Preloaded Stable Audio models — no login required.")
-
-    with gr.Row():
-        with gr.Column():
-            model_selector = gr.Dropdown(
-                label="Select Model",
-                choices=[
-                    "models/stabilityai__stable-audio-open-1.0",
-                    "models/PsiPi__audio",
-                    "models/RoyalCities__RC_Infinite_Pianos",
-                    "models/RoyalCities__Vocal_Textures_Main",
-                    "models/Nekochu__stable-audio-open-1.0-Music",
-                    "models/santifiorino__SAO-Instrumental-Finetune",
-                    "models/adlb__Audialab_EDM_Elements",
-                    "models/bleepybloops__sao_vae_tuned_100k"
-                ],
-                value="stabilityai/stable-audio-open-1.0",
-                interactive=True
-            )
-            model_selector.change(fn=load_model, inputs=[model_selector], outputs=[])
-
-            preset_dropdown = gr.Dropdown(label="Style Preset", choices=[""] + list(PRESETS.keys()), interactive=True)
-            prompt_input = gr.Textbox(label="Prompts (one per line)", lines=8)
-            duration_slider = gr.Slider(1, 240, value=10, label="Duration (seconds)")
-            steps_slider = gr.Slider(20, 250, value=100, label="Sampling Steps")
-            cfg_slider = gr.Slider(1, 12, value=7, label="CFG Scale")
-            sampler_dropdown = gr.Dropdown(label="Sampler", choices=["dpmpp-3m-sde", "dpmpp-2m", "euler", "heun", "lms"], value="dpmpp-3m-sde")
-            audio_upload = gr.Audio(label="Upload Audio (optional)", type="filepath")
-            audio_mix_slider = gr.Slider(0.0, 1.0, value=0.5, label="Prompt / Audio Mix")
-            generate_btn = gr.Button("Generate")
-            stop_btn = gr.Button("🛑 Stop", variant="stop")
-
-        with gr.Column():
-            audio1 = gr.Audio(label="Preview Clip 1", type="filepath")
-            audio2 = gr.Audio(label="Preview Clip 2", type="filepath")
-            audio3 = gr.Audio(label="Preview Clip 3", type="filepath")
-            zip_download = gr.File(label="Download All as ZIP")
-            history_box = gr.Textbox(label="Prompt History", lines=10)
-
-    preset_dropdown.change(set_preset, inputs=preset_dropdown, outputs=prompt_input)
-
-    generate_event = generate_btn.click(
-        fn=generate_audio_batch,
-        inputs=[
-            prompt_input,
-            duration_slider,
-            steps_slider,
-            cfg_slider,
-            sampler_dropdown,
-            audio_upload,
-            audio_mix_slider
-        ],
-        outputs=[audio1, audio2, audio3, zip_download, history_box]
-    )
-
-    stop_btn.click(fn=stop_generation, inputs=[], outputs=[history_box])
+    return demo
 
 if __name__ == "__main__":
-    demo.queue().launch()
-
+    interface().queue().launch()

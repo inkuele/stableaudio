@@ -3,6 +3,8 @@ build/*
 dist/*
 flagged/*
 models/*
+models2/*
+local_models/*
 *.wav
 *.spec
 *.DS_Store
