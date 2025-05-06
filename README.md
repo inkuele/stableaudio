@@ -2,6 +2,8 @@
 
 This repository provides a simple-to-use interface for the Stable Audio open model and other fine-tuned variants, running fully offline with local models and encoders.
 
+This repository and workshop preparation have been created for the [Inküle](https://www.inkuele.de).
+
 ## A. Overview
 
 * **Purpose**: Create a standalone web GUI for generating audio using the Stable Audio open model (and any fine-tuned checkpoints) without external API calls.
@@ -82,9 +84,9 @@ python3.8 run_gradio_offline_with_t5.py
 
 Open your browser at the address printed in the console to start generating audio!
 
-## E. Packaging as a Standalone Installer
+## E. Packaging as a Standalone Executable (Script Only)
 
-You can create a standalone executable or installer using **PyInstaller**, which bundles Python, your scripts, and dependencies into a single file or folder.
+To distribute only the Python script (assuming users will provide their own local `models/` and `encoders/` folders), use PyInstaller:
 
 1. **Install PyInstaller**
 
@@ -98,18 +100,24 @@ You can create a standalone executable or installer using **PyInstaller**, which
    pyinstaller \
      --name stableaudio_gui \
      --onefile \
-     --add-data "models:models" \
-     --add-data "encoders:encoders" \
-     --hidden-import transformers.tokenization_t5 \
-     --hidden-import transformers.models.t5 \
      run_gradio_offline_with_t5.py
    ```
 
-   * `--onefile` bundles everything into a single executable.
-   * `--add-data` includes your `models` and `encoders` directories.
-   * `--hidden-import` ensures T5 tokenizer/encoder modules are included.
+   * `--onefile` bundles Python, your script, and all required libraries into a single executable.
+   * You **do not** include `models/` or `encoders/`—those directories must exist beside the executable at runtime.
 
-3. **Run the Bundled App**
+3. **Prepare your distribution folder**
+
+   After building, ship the executable alongside the `models/` and `encoders/` directories:
+
+   ```
+   dist/
+   ├── stableaudio_gui      # your bundled executable
+   models/                  # user-provided models folder
+   encoders/                # user-provided encoders folder
+   ```
+
+4. **Run the Executable**
 
    * On **Linux/macOS**:
 
@@ -122,11 +130,7 @@ You can create a standalone executable or installer using **PyInstaller**, which
      .\dist\stableaudio_gui.exe
      ```
 
-4. **Distribute**
-
-   Share the single executable in `dist/` with users—no Python or external dependencies needed.
-
-> **Tip:** For platform-specific installers (e.g., `.msi` on Windows or `.dmg` on macOS), wrap the PyInstaller output using tools like [WiX](https://wixtoolset.org/) or macOS's `hdiutil`.
+Users will need to place their own `models/` and `encoders/` folders in the same location as the executable. This keeps the distribution lightweight and assumes local assets are managed separately.
 
 ---
 
