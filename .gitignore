@@ -5,6 +5,8 @@ flagged/*
 models/*
 models2/*
 local_models/*
+__pycache__/*
+encoders/*
 *.wav
 *.spec
 *.DS_Store
