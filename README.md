@@ -97,10 +97,12 @@ To distribute only the Python script (assuming users will provide their own loca
 2. **Package your script**
 
    ```bash
-   pyinstaller \
-     --name stableaudio_gui \
-     --onefile \
-     run_gradio_offline_with_t5.py
+    pyinstaller \
+      --name stableaudio_gui \
+      --onefile \
+      --collect-data gradio_client \
+      --collect-data gradio \
+      run_gradio_offline_with_t5.py
    ```
 
    * `--onefile` bundles Python, your script, and all required libraries into a single executable.
