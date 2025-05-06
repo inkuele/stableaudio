@@ -1,8 +1,9 @@
+
+This repository and workshop preparation have been created for the [Inküle](https://www.inkuele.de).
+
 # Stable Audio Offline GUI
 
 This repository provides a simple-to-use interface for the Stable Audio open model and other fine-tuned variants, running fully offline with local models and encoders.
-
-This repository and workshop preparation have been created for the [Inküle](https://www.inkuele.de).
 
 ## A. Overview
 
@@ -86,53 +87,46 @@ Open your browser at the address printed in the console to start generating audi
 
 ## E. Packaging as a Standalone Executable (Script Only)
 
-To distribute only the Python script (assuming users will provide their own local `models/` and `encoders/` folders), use PyInstaller:
+To distribute only the Python script (assuming users will provide their own local `models/` and `encoders/` folders), use PyInstaller. You have two approaches:
+
+### E.1 Automatic Collection (Convenient)
 
 1. **Install PyInstaller**
 
    ```bash
    pip install pyinstaller
    ```
-
-2. **Package your script**
+2. **Build including Gradio data**
 
    ```bash
-    pyinstaller \
-      --name stableaudio_gui \
-      --onefile \
-      --collect-data gradio_client \
-      --collect-data gradio \
-      run_gradio_offline_with_t5.py
+   pyinstaller \
+     --name stableaudio_gui \
+     --onefile \
+     --collect-data gradio_client \
+     run_gradio_offline_with_t5.py
    ```
 
-   * `--onefile` bundles Python, your script, and all required libraries into a single executable.
-   * You **do not** include `models/` or `encoders/`—those directories must exist beside the executable at runtime.
+   * `--collect-data gradio_client` ensures files like `version.txt` are bundled.
 
-3. **Prepare your distribution folder**
+### E.2 Manual Data Inclusion (Safer)
 
-   After building, ship the executable alongside the `models/` and `encoders/` directories:
+1. **Locate the missing file**
 
+   ```bash
+   python -c "import gradio_client, os; print(os.path.join(os.path.dirname(gradio_client.__file__),'version.txt'))"
    ```
-   dist/
-   ├── stableaudio_gui      # your bundled executable
-   models/                  # user-provided models folder
-   encoders/                # user-provided encoders folder
+2. **Build with explicit `add-data`**
+
+   ```bash
+   pyinstaller \
+     --name stableaudio_gui \
+     --onefile \
+     --add-data "/path/to/version.txt:gradio_client" \
+     run_gradio_offline_with_t5.py
    ```
 
-4. **Run the Executable**
-
-   * On **Linux/macOS**:
-
-     ```bash
-     ./dist/stableaudio_gui
-     ```
-   * On **Windows**:
-
-     ```powershell
-     .\dist\stableaudio_gui.exe
-     ```
-
-Users will need to place their own `models/` and `encoders/` folders in the same location as the executable. This keeps the distribution lightweight and assumes local assets are managed separately.
+   * Replace `/path/to/version.txt` with the path printed in step 1.
+   * This bundles only that one data file, minimizing extras.
 
 ---
 
