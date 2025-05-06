@@ -82,3 +82,53 @@ python3.8 run_gradio_offline_with_t5.py
 
 Open your browser at the address printed in the console to start generating audio!
 
+## E. Packaging as a Standalone Installer
+
+You can create a standalone executable or installer using **PyInstaller**, which bundles Python, your scripts, and dependencies into a single file or folder.
+
+1. **Install PyInstaller**
+
+   ```bash
+   pip install pyinstaller
+   ```
+
+2. **Package your script**
+
+   ```bash
+   pyinstaller \
+     --name stableaudio_gui \
+     --onefile \
+     --add-data "models:models" \
+     --add-data "encoders:encoders" \
+     --hidden-import transformers.tokenization_t5 \
+     --hidden-import transformers.models.t5 \
+     run_gradio_offline_with_t5.py
+   ```
+
+   * `--onefile` bundles everything into a single executable.
+   * `--add-data` includes your `models` and `encoders` directories.
+   * `--hidden-import` ensures T5 tokenizer/encoder modules are included.
+
+3. **Run the Bundled App**
+
+   * On **Linux/macOS**:
+
+     ```bash
+     ./dist/stableaudio_gui
+     ```
+   * On **Windows**:
+
+     ```powershell
+     .\dist\stableaudio_gui.exe
+     ```
+
+4. **Distribute**
+
+   Share the single executable in `dist/` with users—no Python or external dependencies needed.
+
+> **Tip:** For platform-specific installers (e.g., `.msi` on Windows or `.dmg` on macOS), wrap the PyInstaller output using tools like [WiX](https://wixtoolset.org/) or macOS's `hdiutil`.
+
+---
+
+*Last updated: May 6, 2025*
+
