@@ -85,7 +85,7 @@ python3.8 run_gradio_offline_with_t5.py
 
 Open your browser at the address printed in the console to start generating audio!
 
-## E. Packaging as a Standalone Executable (Script Only)
+## E. Packaging as a Standalone Executable (Script Only) - NOT WORKING YET, only for reference
 
 To distribute only the Python script (assuming users will provide their own local `models/` and `encoders/` folders), use PyInstaller. You have two approaches:
 
@@ -113,20 +113,24 @@ To distribute only the Python script (assuming users will provide their own loca
 1. **Locate the missing file**
 
    ```bash
-   python -c "import gradio_client, os; print(os.path.join(os.path.dirname(gradio_client.__file__),'version.txt'))"
+    python -c "import gradio_client, os; print(os.path.join(os.path.dirname(gradio_client.__file__),'version.txt'))"
+    python -c "import gradio_client, os; print(os.path.join(os.path.dirname(gradio_client.__file__),'types.json'))"
+    python -c "import gradio, os; print(os.path.join(os.path.dirname(gradio.__file__),'version.txt'))"
    ```
 2. **Build with explicit `add-data`**
 
    ```bash
-   pyinstaller \
-     --name stableaudio_gui \
-     --onefile \
-     --add-data "/path/to/version.txt:gradio_client" \
-     run_gradio_offline_with_t5.py
+    pyinstaller \
+      --name stableaudio_gui \
+      --onefile \
+      --add-data "/path/to/gradio_client/version.txt:gradio_client" \
+      --add-data "/path/to/gradio_client/types.json:gradio_client" \
+      --add-data "/path/to/gradio/version.txt:gradio" \
+      run_gradio_offline_with_t5.py
    ```
 
-   * Replace `/path/to/version.txt` with the path printed in step 1.
-   * This bundles only that one data file, minimizing extras.
+    * Replace each /path/to/... with the paths printed.
+    * This ensures all required metadata files are included.
 
 ---
 
