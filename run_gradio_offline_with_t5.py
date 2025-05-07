@@ -8,57 +8,84 @@ import gradio as gr
 import time
 import zipfile
 
-# === New: load local T5 encoder ===
+# === Load local T5 encoder ===
 from encoders import tokenizer, encoder
-# ====================================
+# =============================
 
 from stable_audio_tools.models.factory import create_model_from_config
 from stable_audio_tools.models.utils import load_ckpt_state_dict
 from stable_audio_tools.inference.generation import generate_diffusion_cond
 
-# Global interrupt flag
-stop_requested = False
-
-# Device selection: MPS -> CUDA -> CPU
+# --- Device selection ---
 def get_device():
     if torch.backends.mps.is_available():
         return torch.device("mps")
-    elif torch.cuda.is_available() and torch.version.cuda is not None:
+    elif torch.cuda.is_available():
         return torch.device("cuda")
     else:
         return torch.device("cpu")
-
 device = get_device()
 print(f"Using device: {device}")
 
-# Helper to find the model directory
-def find_model_subdir(base_dir: str) -> str:
-    if os.path.isfile(os.path.join(base_dir, "model_config.json")):
-        return base_dir
-    for entry in os.listdir(base_dir):
-        subdir = os.path.join(base_dir, entry)
-        if os.path.isdir(subdir) and os.path.isfile(os.path.join(subdir, "model_config.json")):
-            return subdir
-    raise FileNotFoundError(f"No Stable Audio model found under '{base_dir}'")
+# --- Checkpoint management ---
+MODEL_DIR = "models"
 
-# Load and initialize the Stable Audio model
-def load_model():
+def list_checkpoints():
+    """
+    Scan each model folder and list all .safetensors and .ckpt files.
+    Returns list of strings 'folder/filename'.
+    """
+    options = []
+    if os.path.isdir(MODEL_DIR):
+        for folder in sorted(os.listdir(MODEL_DIR)):
+            folder_path = os.path.join(MODEL_DIR, folder)
+            if not os.path.isdir(folder_path):
+                continue
+            for fname in sorted(os.listdir(folder_path)):
+                if fname.endswith(".safetensors") or fname.endswith(".ckpt"):
+                    options.append(f"{folder}/{fname}")
+    return options
+
+ckpt_options = list_checkpoints()
+if not ckpt_options:
+    raise RuntimeError(f"No checkpoints found under '{MODEL_DIR}'")
+
+def parse_ckpt_selection(selection: str):
+    """Split 'folder/filename' into folder and filename"""
+    folder, fname = selection.split('/', 1)
+    return folder, fname
+
+# Globals for current model
+model = None
+model_config = None
+default_sample_rate = 44100
+
+# --- Load model by checkpoint selection ---
+def load_model(selection: str):
     global model, model_config, default_sample_rate
-    model_root = find_model_subdir("models")
-    config_path = os.path.join(model_root, "model_config.json")
-    ckpt_path = os.path.join(model_root, "model.safetensors")
-    with open(config_path, "r") as f:
+    folder, fname = parse_ckpt_selection(selection)
+    root = os.path.join(MODEL_DIR, folder)
+    # Read config
+    with open(os.path.join(root, "model_config.json"), 'r') as f:
         model_config = json.load(f)
-    model = create_model_from_config(model_config)
+    # Load checkpoint file explicitly
+    ckpt_path = os.path.join(root, fname)
+    if not os.path.isfile(ckpt_path):
+        raise FileNotFoundError(f"Checkpoint file not found: {ckpt_path}")
+    # Instantiate
+    m = create_model_from_config(model_config)
     state = load_ckpt_state_dict(ckpt_path)
-    model.load_state_dict(state)
-    model = model.to(device)
+    m.load_state_dict(state)
+    model = m.to(device)
     default_sample_rate = model_config.get("sample_rate", 44100)
+    print(f"Loaded '{selection}' at {default_sample_rate}Hz on {device}")
+    return f"Loaded: {selection}"  
 
-# Initialize the single offline model
-load_model()
+# Initialize default
+current_ckpt = ckpt_options[0]
+model_status = load_model(current_ckpt)
 
-# Prompt style presets
+# --- Presets ---
 PRESETS = {
     "Ambient": "ambient drone, reverb tails, 60 BPM",
     "Tech House Loop": "128 BPM tech house drum loop, dry mix",
@@ -67,145 +94,107 @@ PRESETS = {
     "Modular Synth": "modular synth arpeggio in stereo, 90 BPM"
 }
 
-# Audio generation function
-def generate_audio_batch(
-    prompts_text,
-    negative_prompt,
-    start_sec,
-    duration_sec,
-    steps,
-    cfg_scale,
-    sampler_type,
-    sigma_min,
-    sigma_max,
-    out_sample_rate,
-    uploaded_audio,
-    audio_mix,
+# --- Audio generation with timing info ---
+def generate_audio(
+    prompts, neg_prompt, start_sec, duration_sec,
+    steps, cfg, sampler, sigma_min, sigma_max,
+    sr, upload, mix,
     progress=gr.Progress(track_tqdm=True)
 ):
-    global stop_requested
-    stop_requested = False
-    previews = []
-    statuses = []
-    file_paths = []
-    t_total_start = time.time()
-
-    # Generate embeddings with T5 encoder
-    raw_prompts = [p.strip() for p in prompts_text.splitlines() if p.strip()]
-    prompt_embs = []
-    enc_device = next(encoder.parameters()).device
-    for p in raw_prompts:
-        toks = tokenizer(p, return_tensors="pt").input_ids.to(enc_device)
-        emb = encoder(input_ids=toks).last_hidden_state.to(device)
-        prompt_embs.append(emb)
+    global model
+    lines = [l.strip() for l in prompts.splitlines() if l.strip()]
+    # Encode prompts
+    embs = []
+    enc_dev = next(encoder.parameters()).device
+    for txt in lines:
+        ids = tokenizer(txt, return_tensors="pt").input_ids.to(enc_dev)
+        emb = encoder(input_ids=ids).last_hidden_state.to(device)
+        embs.append(emb)
     neg_emb = None
-    if negative_prompt:
-        neg_toks = tokenizer(negative_prompt, return_tensors="pt").input_ids.to(enc_device)
-        neg_emb = encoder(input_ids=neg_toks).last_hidden_state.to(device)
-
-    for idx, emb in enumerate(prompt_embs):
-        if stop_requested:
-            statuses.append("🛑 Stopped by user.")
-            break
-
-        progress((idx+1)/len(prompt_embs), desc=f"Generating prompt {idx+1}/{len(prompt_embs)}…")
-        conditioning = []
-
-        conditioning.append({
-            "prompt": raw_prompts[idx],
-            "text_embeddings": emb,
-            "seconds_start": start_sec,
-            "seconds_total": duration_sec,
-            "weight": 1.0
-        })
-        if neg_emb is not None:
-            conditioning.append({
-                "prompt": negative_prompt,
-                "text_embeddings": neg_emb,
-                "seconds_start": start_sec,
-                "seconds_total": duration_sec,
-                "weight": -cfg_scale
-            })
-        if uploaded_audio and audio_mix > 0.0:
-            conditioning.append({
-                "audio_filepath": uploaded_audio,
-                "seconds_start": start_sec,
-                "seconds_total": duration_sec,
-                "weight": audio_mix
-            })
-
+    if neg_prompt:
+        ids = tokenizer(neg_prompt, return_tensors="pt").input_ids.to(enc_dev)
+        neg_emb = encoder(input_ids=ids).last_hidden_state.to(device)
+    # Generate
+    previews, files, statuses = [], [], []
+    total = len(embs)
+    times = []
+    for i, emb in enumerate(embs):
+        t0 = time.time()
+        frac = i/total if total else 0
+        progress(frac, desc=f"Gen {i+1}/{total}")
+        cond = [{"prompt": lines[i], "text_embeddings": emb,
+                 "seconds_start": start_sec, "seconds_total": duration_sec, "weight": 1.0}]
+        if neg_emb:
+            cond.append({"prompt": neg_prompt, "text_embeddings": neg_emb,
+                         "seconds_start": start_sec, "seconds_total": duration_sec, "weight": -cfg})
+        if upload and mix>0:
+            cond.append({"audio_filepath": upload,
+                         "seconds_start": start_sec, "seconds_total": duration_sec, "weight": mix})
         with torch.no_grad():
-            output = generate_diffusion_cond(
-                model=model,
-                steps=steps,
-                cfg_scale=cfg_scale,
-                conditioning=conditioning,
-                sample_size=out_sample_rate * duration_sec,
-                sigma_min=sigma_min,
-                sigma_max=sigma_max,
-                sampler_type=sampler_type,
-                device=device,
+            out = generate_diffusion_cond(
+                model=model, steps=steps, cfg_scale=cfg,
+                conditioning=cond, sample_size=sr*duration_sec,
+                sigma_min=sigma_min, sigma_max=sigma_max,
+                sampler_type=sampler, device=device
             )
+        audio = rearrange(out, "b d n -> d (b n)").float().cpu().numpy()
+        audio /= (abs(audio).max()+1e-5)
+        path = os.path.join(tempfile.gettempdir(), f"preview_{i}.wav")
+        torchaudio.save(path, torch.tensor(audio), sr)
+        files.append(path)
+        elapsed = time.time() - t0
+        times.append(elapsed)
+        avg = sum(times)/len(times)
+        rem = avg*(total-(i+1))
+        statuses.append(f"{lines[i]} ⏱{elapsed:.1f}s (avg {avg:.1f}s, rem ~{rem:.1f}s)")
+    progress(1.0, desc="Done")
+    zipf = os.path.join(tempfile.gettempdir(), f"audio_{int(time.time())}.zip")
+    with zipfile.ZipFile(zipf, "w") as zf:
+        for p in files: zf.write(p, os.path.basename(p))
+    while len(files)<3: files.append(None)
+    return (*files[:3], zipf, "\n".join(statuses))
 
-        # Post-process
-        audio_tensor = rearrange(output, "b d n -> d (b n)").float().cpu().numpy()
-        audio_tensor /= (abs(audio_tensor).max() + 1e-5)
-        previews.append(audio_tensor)
-
-        # Save preview WAV (2D tensor: channels x samples)
-        out_path = os.path.join(tempfile.gettempdir(), f"preview_{idx}.wav")
-        torchaudio.save(out_path, torch.tensor(audio_tensor), out_sample_rate)
-        file_paths.append(out_path)
-
-        statuses.append(f"{raw_prompts[idx]}  ⏱ {time.time() - t_total_start:.1f}s")
-
-    # Zip outputs
-    zip_path = os.path.join(tempfile.gettempdir(), f"stablediff_audio_{int(time.time())}.zip")
-    with zipfile.ZipFile(zip_path, "w") as zf:
-        for p in file_paths:
-            zf.write(p, arcname=os.path.basename(p))
-
-    while len(file_paths) < 3:
-        file_paths.append(None)
-
-    return (*file_paths[:3], zip_path, "\n".join(statuses))
-
-# Stop callback
-def stop_generation():
-    global stop_requested
-    stop_requested = True
-    return gr.update(value="🛑 Stop requested…")
-
-# Build Gradio UI
-with gr.Blocks(title="🎵 Stable Audio Generator") as demo:
+# --- UI ---
+with gr.Blocks(title="Stable Audio Offline") as ui:
     gr.Markdown("## 🎵 Stable Audio (Offline)")
+    device_tb = gr.Textbox(label="Compute Device", value=str(device), interactive=False)
     with gr.Row():
         with gr.Column():
-            preset_dropdown = gr.Dropdown(label="Style Preset", choices=[""] + list(PRESETS.keys()))
-            prompt_input = gr.Textbox(label="Prompts (one per line)", lines=6)
-            preset_dropdown.change(lambda p: PRESETS.get(p, ""), preset_dropdown, prompt_input)
-            negative_input = gr.Textbox(label="Negative Prompt (optional)", lines=2)
-            start_slider = gr.Slider(0.0, 60.0, value=0.0, step=0.5, label="Seconds Start")
-            duration_slider = gr.Slider(1, 240, value=10, label="Duration (seconds)")
-            steps_slider = gr.Slider(20, 250, value=100, label="Sampling Steps")
-            cfg_slider = gr.Slider(1.0, 12.0, value=7.0, label="CFG Scale")
-            sampler_dropdown = gr.Dropdown(label="Sampler", choices=["dpmpp-3m-sde","dpmpp-2m","euler","heun","lms"], value="dpmpp-3m-sde")
-            sigma_min_slider = gr.Slider(0.0,1.0,value=model_config.get("sigma_min",0.3),label="Sigma Min")
-            sigma_max_slider = gr.Slider(0.0,1000.0,value=model_config.get("sigma_max",500.0),label="Sigma Max")
-            sample_rate_dropdown = gr.Dropdown(label="Output Sample Rate",choices=[16000,22050,32000,44100,48000],value=default_sample_rate)
-            audio_upload = gr.Audio(label="Upload Audio (optional)",type="filepath")
-            audio_mix_slider = gr.Slider(0.0,1.0,value=0.5,label="Prompt / Audio Mix")
-            generate_btn = gr.Button("Generate")
-            stop_btn = gr.Button("🛑 Stop", variant="stop")
-        with gr.Column():
-            audio1 = gr.Audio(label="Preview Clip 1",type="filepath")
-            audio2 = gr.Audio(label="Preview Clip 2",type="filepath")
-            audio3 = gr.Audio(label="Preview Clip 3",type="filepath")
-            zip_download = gr.File(label="Download All as ZIP")
-            history_box = gr.Textbox(label="Prompt History",lines=10)
+            ckpt_dd = gr.Dropdown(label="Checkpoint", choices=ckpt_options, value=current_ckpt)
+            status_tb = gr.Textbox(label="Status", value=model_status, interactive=False)
+            ckpt_dd.change(
+                fn=lambda sel: (load_model(sel), str(next(model.parameters()).device)),
+                inputs=[ckpt_dd], outputs=[status_tb, device_tb]
+            )
+            preset_dd = gr.Dropdown(label="Preset", choices=[""]+list(PRESETS.keys()))
+            prompt_tb = gr.Textbox(label="Prompts (one per line)", lines=6)
+            preset_dd.change(lambda p: PRESETS.get(p, ""), preset_dd, prompt_tb)
+            neg_tb = gr.Textbox(label="Negative Prompt", lines=2)
+            start_sl = gr.Slider(0,60,value=0,label="Start (s)")
+            dur_sl = gr.Slider(1,240,value=10,label="Duration (s)")
+            gen_btn = gr.Button("Generate")
+            stop_btn = gr.Button("Stop", variant="stop")
+            steps_sl = gr.Slider(20,250,value=100,label="Steps")
+            cfg_sl = gr.Slider(1,12,value=7,label="CFG Scale")
+            samp_dd = gr.Dropdown(label="Sampler",choices=["dpmpp-3m-sde","dpmpp-2m","euler","heun","lms"],value="dpmpp-3m-sde")
+            smin_sl = gr.Slider(0.0,1.0,value=0.3,label="Sigma Min")
+            smax_sl = gr.Slider(0.0,1000.0,value=500.0,label="Sigma Max")
+            sr_dd = gr.Dropdown(label="Sample Rate",choices=[16000,22050,32000,44100,48000],value=default_sample_rate)
+            audio_up = gr.Audio(label="Upload Audio", type="filepath")
+            mix_sl = gr.Slider(0.0,1.0,value=0.5,label="Audio Mix")
 
-    generate_btn.click(generate_audio_batch, inputs=[prompt_input,negative_input,start_slider,duration_slider,steps_slider,cfg_slider,sampler_dropdown,sigma_min_slider,sigma_max_slider,sample_rate_dropdown,audio_upload,audio_mix_slider], outputs=[audio1,audio2,audio3,zip_download,history_box])
-    stop_btn.click(stop_generation, outputs=[history_box])
+        with gr.Column():
+            aud1 = gr.Audio(label="Preview 1", type="filepath")
+            aud2 = gr.Audio(label="Preview 2", type="filepath")
+            aud3 = gr.Audio(label="Preview 3", type="filepath")
+            zip_dl = gr.File(label="Download ZIP")
+            hist = gr.Textbox(label="History", lines=10)
+    gen_btn.click(
+        generate_audio,
+        inputs=[prompt_tb, neg_tb, start_sl, dur_sl, steps_sl, cfg_sl, samp_dd, smin_sl, smax_sl, sr_dd, audio_up, mix_sl],
+        outputs=[aud1, aud2, aud3, zip_dl, hist]
+    )
+    stop_btn.click(lambda: None, [], [])
 
 if __name__ == "__main__":
-    demo.queue().launch(share=False, server_name="0.0.0.0", server_port=7860)
+    ui.queue().launch(share=False, server_name="0.0.0.0", server_port=7860)
