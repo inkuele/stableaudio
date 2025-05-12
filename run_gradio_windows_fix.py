@@ -157,19 +157,19 @@ def generate_audio(
                 # generate
         try:
             # generate with a safe int32 seed
-            seed_val = random.randint(0, 2**31 - 1)
-            out = generate_diffusion_cond(
-                model=model,
-                seed=seed_val,
-                steps=steps,
-                cfg_scale=cfg,
-                conditioning=cond,
-                sample_size=int(duration_sec * sr),
-                sigma_min=sigma_min,
-                sigma_max=sigma_max,
-                sampler_type=sampler,
-                device=device
-            )
+        seed_val = random.randint(0, 2**31 - 1)
+        out = generate_diffusion_cond(
+            model=model,
+            seed=seed_val,
+            steps=steps,
+            cfg_scale=cfg,
+            conditioning=cond,
+            sample_size=int(duration_sec * sr),
+            sigma_min=sigma_min,
+            sigma_max=sigma_max,
+            sampler_type=sampler,
+            device=device
+        )
         except RuntimeError as e:
             # fallback for models that do not support negative conditioning (shape mismatch)
             err = str(e)
