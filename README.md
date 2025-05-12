@@ -33,6 +33,11 @@ brew install pyenv
 pyenv install 3.8.10
 cd ~/my-project
 pyenv local 3.8.10
+
+```
+### Windows
+```bash
+https://www.python.org/ftp/python/3.8.10/python-3.8.10-amd64.exe
 ```
 
 ### 2. Create and Activate Virtual Environment
@@ -41,6 +46,31 @@ pyenv local 3.8.10
 python3.8 -m venv venv
 source venv/bin/activate
 ```
+
+#### Windows
+```bash
+py -3.8 -m venv venv
+.\venv\Scripts\Activate.ps1
+
+
+if you get this error on windows:
+ .\venv\Scripts\Activate.ps1
+.\venv\Scripts\Activate.ps1 : Die Datei "C:\Users\anast\OneDrive\Dokumente\git\stableaudio\venv\Scripts\Activate.ps1"
+kann nicht geladen werden, da die Ausführung von Skripts auf diesem System deaktiviert ist. Weitere Informationen
+finden Sie unter "about_Execution_Policies" (https:/go.microsoft.com/fwlink/?LinkID=135170).
+In Zeile:1 Zeichen:1
++ .\venv\Scripts\Activate.ps1
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : Sicherheitsfehler: (:) [], PSSecurityException
+    + FullyQualifiedErrorId : UnauthorizedAccess
+
+either temporary allow scripts:
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+
+or permanently allow scripts:
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
 
 ### 3. Install Dependencies
 
@@ -52,6 +82,11 @@ pip3.8 install https://github.com/buscon/stable-audio-tools/archive/refs/heads/m
 
 ```bash
 python3.8 stableaudio_test.py
+```
+
+### Windows
+```bash
+python .\stableaudio_test.py
 ```
 
 ### 5. (macOS Only) Fix `soundfile` Errors
