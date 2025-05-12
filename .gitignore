@@ -4,6 +4,7 @@ dist/*
 flagged/*
 models/*
 models2/*
+models.lnk
 local_models/*
 __pycache__/*
 encoders/*
