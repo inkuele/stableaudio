@@ -9,6 +9,7 @@ import torch
 import torchaudio
 from einops import rearrange
 import gradio as gr
+import random  # for bounded seed generation on Windows
 
 # === Load local T5 encoder ===
 from encoders import tokenizer, encoder
@@ -115,25 +116,36 @@ def generate_audio(
             statuses.append("🛑 Generation stopped by user.")
             break
 
+        # reseed for diversity
         torch.manual_seed(int(time.time() * 1e6) % (2**32))
-        # build conditioning list
-        cond = []
-        # prompt weight
-        cond.append({
+
+        # build positive conditioning list
+        cond_pos = [{
             "prompt": prompt,
             "seconds_start": start_sec,
             "seconds_total": duration_sec,
             "weight": 1.0 - mix
-        })
-        # optional audio mix
+        }]
         if upload and mix > 0:
-            cond.append({
+            cond_pos.append({
                 "audio_filepath": upload,
                 "seconds_start": start_sec,
                 "seconds_total": duration_sec,
                 "weight": mix
             })
-        # negative prompt
+
+        # build negative conditioning list
+        cond_neg = []
+        if neg_prompt and neg_prompt.strip():
+            cond_neg = [{
+                "prompt": neg_prompt,
+                "seconds_start": start_sec,
+                "seconds_total": duration_sec,
+                "weight": 1.0
+            }]
+
+                # combine positive + negative entries into single conditioning list
+        cond = cond_pos.copy()
         if neg_prompt and neg_prompt.strip():
             cond.append({
                 "prompt": neg_prompt,
@@ -142,9 +154,13 @@ def generate_audio(
                 "weight": -cfg
             })
 
-        # generate
+                # generate
+        try:
+            # generate with a safe int32 seed
+        seed_val = random.randint(0, 2**31 - 1)
         out = generate_diffusion_cond(
             model=model,
+            seed=seed_val,
             steps=steps,
             cfg_scale=cfg,
             conditioning=cond,
@@ -154,8 +170,29 @@ def generate_audio(
             sampler_type=sampler,
             device=device
         )
+        except RuntimeError as e:
+            # fallback for models that do not support negative conditioning (shape mismatch)
+            err = str(e)
+            if 'size of tensor a' in err or 'Conditioner key' in err:
+                statuses.append('⚠️ Negative prompt unsupported, retrying without it.')
+                # retry without negative weights
+                seed_val = random.randint(0, 2**31 - 1)
+                out = generate_diffusion_cond(
+                    model=model,
+                    seed=seed_val,
+                    steps=steps,
+                    cfg_scale=cfg,
+                    conditioning=cond,
+                    sample_size=int(duration_sec * sr),
+                    sigma_min=sigma_min,
+                    sigma_max=sigma_max,
+                    sampler_type=sampler,
+                    device=device
+                )
+            else:
+                raise
 
-        # post-process single-sample batch
+        # post-process audio (single sample)
         audio = rearrange(out, "b d n -> d (b n)").float().cpu()
         audio = audio / (audio.abs().max() + 1e-5)
         audio_int16 = audio.clamp(-1, 1).mul(32767).to(torch.int16)
@@ -172,11 +209,11 @@ def generate_audio(
         prompt_history.append(entry)
         statuses.append(entry)
 
-    # fill up previews
+    # pad preview list to 3
     while len(previews) < 3:
         previews.append(None)
 
-    # zip results
+    # package into ZIP
     zip_path = os.path.join(tempfile.gettempdir(), f"audio_{int(time.time())}.zip")
     with zipfile.ZipFile(zip_path, "w") as zf:
         for f in files:
@@ -189,6 +226,7 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
     gr.Markdown("## 🎵 Stable Audio (Offline)")
     with gr.Row():
         gen_btn = gr.Button("Generate")
+        stop_btn = gr.Button("🛑 Stop", variant="stop")
         device_md = gr.Markdown(f"**Device:** `{device}`")
         ckpt_dd = gr.Dropdown(label="Checkpoint", choices=ckpt_options, value=current_ckpt)
         status_tb = gr.Textbox(label="Status", value=model_status, interactive=False)
@@ -206,7 +244,7 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
             smin_sl = gr.Slider(0.0, 1.0, value=0.3, label="Sigma Min")
             smax_sl = gr.Slider(0.0, 1000.0, value=500.0, label="Sigma Max")
             sr_dd = gr.Dropdown(label="Sample Rate", choices=[16000,22050,32000,44100,48000], value=default_sample_rate)
-            batch_cb = gr.Checkbox(label="Batch mode", value=True)
+            batch_cb = gr.Checkbox(label="Batch mode", value=False)
             audio_up = gr.Audio(label="Upload Audio", type="filepath")
             mix_sl = gr.Slider(0.0, 1.0, value=0.5, label="Audio Mix")
         with gr.Column():
@@ -215,15 +253,28 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
             aud3 = gr.Audio(label="Preview 3", type="filepath")
             zip_dl = gr.File(label="Download ZIP")
             hist = gr.Textbox(label="History", lines=10)
-    ckpt_dd.change(load_model, inputs=[ckpt_dd], outputs=[status_tb])
+        ckpt_dd.change(load_model, inputs=[ckpt_dd], outputs=[status_tb])
     gen_btn.click(
         generate_audio,
-        inputs=[prompt_tb, neg_tb, start_sl, dur_sl, steps_sl, cfg_sl, samp_dd, smin_sl, smax_sl, sr_dd, batch_cb, audio_up, mix_sl],
+        inputs=[
+            prompt_tb,
+            neg_tb,
+            start_sl,
+            dur_sl,
+            steps_sl,
+            cfg_sl,
+            samp_dd,
+            smin_sl,
+            smax_sl,
+            sr_dd,
+            batch_cb,
+            audio_up,
+            mix_sl
+        ],
         outputs=[aud1, aud2, aud3, zip_dl, hist]
     )
+    stop_btn.click(stop_generation, inputs=[], outputs=[hist])
 
 if __name__ == '__main__':
     ui.queue().launch(share=False, server_name="0.0.0.0", server_port=7860)
-
-
 
