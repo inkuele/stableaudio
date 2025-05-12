@@ -74,6 +74,18 @@ Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 ### 3. Install Dependencies
 
+You must install CUDA for your graphic card.
+
+### Windows
+
+For Windows you have to specify the installation of pytorch libraries for your CUDA version
+In our case, we installed CUDA 12.9 and we installed pytorth 12.1 version:
+
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+```
+Then
+
 ```bash
 pip3.8 install https://github.com/buscon/stable-audio-tools/archive/refs/heads/main.zip
 ```
