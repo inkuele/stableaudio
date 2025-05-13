@@ -100,7 +100,7 @@ prompt_history = []
 def generate_audio(
     prompts, neg_prompt, start_sec, duration_sec,
     steps, cfg, sampler, sigma_min, sigma_max,
-    sr, _batch_mode, upload, mix
+    sr, upload, mix
 ):
     global stop_requested, prompt_history
     stop_requested = False
@@ -243,8 +243,7 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
             samp_dd = gr.Dropdown(label="Sampler", choices=["dpmpp-3m-sde","dpmpp-2m","euler","heun","lms"], value="dpmpp-3m-sde")
             smin_sl = gr.Slider(0.0, 1.0, value=0.3, label="Sigma Min")
             smax_sl = gr.Slider(0.0, 1000.0, value=500.0, label="Sigma Max")
-            sr_dd = gr.Dropdown(label="Sample Rate", choices=[16000,22050,32000,44100,48000], value=default_sample_rate)
-            batch_cb = gr.Checkbox(label="Batch mode", value=False)
+            sr_dd = gr.Dropdown(label="Sample Rate", choices=[16000,22050,32000,44100], value=default_sample_rate)
             audio_up = gr.Audio(label="Upload Audio", type="filepath")
             mix_sl = gr.Slider(0.0, 1.0, value=0.5, label="Audio Mix")
         with gr.Column():
@@ -267,7 +266,6 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
             smin_sl,
             smax_sl,
             sr_dd,
-            batch_cb,
             audio_up,
             mix_sl
         ],
