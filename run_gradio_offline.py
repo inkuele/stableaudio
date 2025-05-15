@@ -65,6 +65,11 @@ def load_model(selection: str):
     m = create_model_from_config(model_config)
     state = load_ckpt_state_dict(ckpt_path)
     m.load_state_dict(state)
+    m.eval()
+    try:
+        m = torch.compile(m)
+    except Exception as e:
+        print("Warning: torch.compile() failed, running without compilation.", e)
     model = m.to(device)
     default_sample_rate = model_config.get('sample_rate', 44100)
     msg = f"Loaded: {selection} @ {default_sample_rate}Hz on {device}"
@@ -84,6 +89,7 @@ PRESETS = {
     "Glitchy IDM": "glitchy IDM with bitcrush textures, 100 BPM",
     "Modular Synth": "modular synth arpeggio in stereo, 90 BPM"
 }
+
 
 # --- Audio generation ---
 # Similar to `generate_audio_batch` from the HF example: loop per prompt for stochastic diversity
