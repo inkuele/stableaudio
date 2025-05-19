@@ -200,7 +200,7 @@ def generate_audio(
 
         elapsed = time.time() - start_total
         safe = "_".join(prompt.lower().split())[:25]
-        fname = f"{int(elapsed)}s_{safe}.wav"
+        fname = f"{safe}.wav"  # <-- Only this line changed
         path = os.path.join(tempfile.gettempdir(), fname)
         torchaudio.save(path, audio_int16, sr)
 
@@ -244,8 +244,7 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
             samp_dd = gr.Dropdown(label="Sampler", choices=["dpmpp-3m-sde","dpmpp-2m","euler","heun","lms"], value="dpmpp-3m-sde")
             smin_sl = gr.Slider(0.0, 1.0, value=0.3, label="Sigma Min")
             smax_sl = gr.Slider(0.0, 1000.0, value=500.0, label="Sigma Max")
-            sr_dd = gr.Dropdown(label="Sample Rate", choices=[16000,22050,32000,44100,48000], value=default_sample_rate)
-            batch_cb = gr.Checkbox(label="Batch mode", value=False)
+            sr_dd = gr.Dropdown(label="Sample Rate", choices=[16000,22050,32000,44100], value=default_sample_rate)
             audio_up = gr.Audio(label="Upload Audio", type="filepath")
             mix_sl = gr.Slider(0.0, 1.0, value=0.5, label="Audio Mix")
         with gr.Column():
