@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import random
 import time
 import tempfile
 import zipfile
@@ -122,8 +123,10 @@ def generate_audio(
             break
 
         # reseed for diversity
-        torch.manual_seed(int(time.time() * 1e6) % (2**32))
-
+        # torch.manual_seed(int(time.time() * 1e6) % (2**32))
+        seed = random.getrandbits(32)
+        torch.manual_seed(seed)
+        print(f"🔀 reseeded with random seed {seed}")
         # build positive conditioning list
         cond_pos = [{
             "prompt": prompt,
