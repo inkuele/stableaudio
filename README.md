@@ -16,40 +16,40 @@ This repository provides a simple-to-use interface for the Stable Audio open mod
 
 ## B. Installation
 
-### 1. Install Python 3.8
+### 1. Install Python 3.10
 
 #### Linux
 
 ```bash
 sudo add-apt-repository ppa:deadsnakes/ppa
 sudo apt update
-sudo apt install python3.8-full
+sudo apt install python3.10-full
 ```
 
 #### macOS
 
 ```bash
 brew install pyenv
-pyenv install 3.8.10
+pyenv install 3.10
 cd ~/my-project
-pyenv local 3.8.10
+pyenv local 3.10
 
 ```
 ### Windows
 ```bash
-https://www.python.org/ftp/python/3.8.10/python-3.8.10-amd64.exe
+https://www.python.org/ftp/python/3.10.0/python-3.10.0-amd64.exe
 ```
 
 ### 2. Create and Activate Virtual Environment
 
 ```bash
-python3.8 -m venv venv
+python3.10 -m venv venv
 source venv/bin/activate
 ```
 
 #### Windows
 ```bash
-py -3.8 -m venv venv
+py -3.10 -m venv venv
 .\venv\Scripts\Activate.ps1
 
 
@@ -87,18 +87,18 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 Then
 
 ```bash
-pip3.8 install https://github.com/buscon/stable-audio-tools/archive/refs/heads/main.zip
+pip3.10 install https://github.com/buscon/stable-audio-tools/archive/refs/heads/main.zip
 ```
 
-### 4. Run the Test Script
+### 4. Run the gradio script
 
 ```bash
-python3.8 stableaudio_test.py
+python3.10 run_gradio_offline.py
 ```
 
 ### Windows
 ```bash
-python .\stableaudio_test.py
+python .\run_gradio_offline.py
 ```
 
 ### 5. (macOS Only) Fix `soundfile` Errors
@@ -116,8 +116,8 @@ pip install soundfile
 Copy the `models` and `encoders` folders from your workshop leader, or download them yourself:
 
 ```bash
-python3.8 download_encoder.py
-python3.8 download_models.py
+python3.10 download_encoder.py
+python3.10 download_models.py
 ```
 
 > **Note:** The model checkpoints are large and may take time to download.
