@@ -203,7 +203,8 @@ def generate_audio(
         audio_int16 = audio.clamp(-1, 1).mul(32767).to(torch.int16)
 
         elapsed = time.time() - start_total
-        safe = "_".join(prompt.lower().split())[:25]
+        # sanitize prompt to a filesystem-safe name (keep full length)
+        safe = re.sub(r'[^\w]+', '_', prompt.lower()).strip('_')
         fname = f"{int(elapsed)}s_{safe}.wav"
         path = os.path.join(tempfile.gettempdir(), fname)
         torchaudio.save(path, audio_int16, sr)
