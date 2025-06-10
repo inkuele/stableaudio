@@ -2,6 +2,7 @@ import os
 import re
 import json
 import random
+import socket
 import time
 import tempfile
 import zipfile
@@ -241,13 +242,13 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
             preset_dd.change(lambda p: PRESETS.get(p, ""), preset_dd, prompt_tb)
             neg_tb = gr.Textbox(label="Negative Prompt", lines=2)
             start_sl = gr.Slider(0, 60, value=0, label="Start (s)")
-            dur_sl = gr.Slider(1, 240, value=10, label="Duration (s)")
+            dur_sl = gr.Slider(1, 60, value=30, label="Duration (s)")
             steps_sl = gr.Slider(20, 250, value=100, label="Steps")
             cfg_sl = gr.Slider(1, 12, value=7, label="CFG Scale")
             samp_dd = gr.Dropdown(label="Sampler", choices=["dpmpp-3m-sde","dpmpp-2m","euler","heun","lms"], value="dpmpp-3m-sde")
             smin_sl = gr.Slider(0.0, 1.0, value=0.3, label="Sigma Min")
             smax_sl = gr.Slider(0.0, 1000.0, value=500.0, label="Sigma Max")
-            sr_dd = gr.Dropdown(label="Sample Rate", choices=[16000,22050,32000,44100,48000], value=default_sample_rate)
+            sr_dd = gr.Dropdown(label="Sample Rate", choices=[16000,22050,32000,44100], value=default_sample_rate)
             # batch_cb = gr.Checkbox(label="Batch mode", value=False)
             audio_up = gr.Audio(label="Upload Audio", type="filepath")
             mix_sl = gr.Slider(0.0, 1.0, value=0.5, label="Audio Mix")
@@ -279,5 +280,21 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
     )
     stop_btn.click(stop_generation, inputs=[], outputs=[hist])
 
+def get_local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # doesn't have to be reachable
+        s.connect(("10.255.255.255", 1))
+        IP = s.getsockname()[0]
+    except Exception:
+        IP = "127.0.0.1"
+    finally:
+        s.close()
+    return IP
+
 if __name__ == '__main__':
-    ui.queue().launch(share=False, server_name="0.0.0.0", server_port=7860)
+#    ui.queue().launch(share=False, server_name="0.0.0.0", server_port=7860)
+    local_ip = get_local_ip()
+    print(f"🌐 Serving Gradio interface on: http://{local_ip}:7860")
+    ui.queue().launch(share=False, server_name=local_ip, server_port=7860)
+
