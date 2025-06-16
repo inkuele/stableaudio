@@ -126,6 +126,8 @@ def generate_audio(
         # reseed for diversity
         # torch.manual_seed(int(time.time() * 1e6) % (2**32))
         seed = random.getrandbits(32)
+#        seed = seed if seed != -1 else np.random.randint(0, 2**31 - 1)
+#        seed = random.randint(0, 2**31 - 1)
         torch.manual_seed(seed)
         print(f"🔀 reseeded with random seed {seed}")
         # build positive conditioning list
