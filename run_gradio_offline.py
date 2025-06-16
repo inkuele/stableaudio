@@ -241,7 +241,7 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
             preset_dd.change(lambda p: PRESETS.get(p, ""), preset_dd, prompt_tb)
             neg_tb = gr.Textbox(label="Negative Prompt", lines=2)
             start_sl = gr.Slider(0, 60, value=0, label="Start (s)")
-            dur_sl = gr.Slider(1, 240, value=10, label="Duration (s)")
+            dur_sl = gr.Slider(1, 60, value=30, label="Duration (s)")
             steps_sl = gr.Slider(20, 250, value=100, label="Steps")
             cfg_sl = gr.Slider(1, 12, value=7, label="CFG Scale")
             samp_dd = gr.Dropdown(label="Sampler", choices=["dpmpp-3m-sde","dpmpp-2m","euler","heun","lms"], value="dpmpp-3m-sde")

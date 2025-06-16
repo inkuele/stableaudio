@@ -86,8 +86,10 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 ```
 Then
 
+### for every system:
+
 ```bash
-pip3.10 install https://github.com/buscon/stable-audio-tools/archive/refs/heads/main.zip
+pip3.10 install stable-audio-tools
 ```
 
 ### 4. Run the gradio script
@@ -113,10 +115,9 @@ pip install soundfile
 
 ## C. Models & Encoders
 
-Copy the `models` and `encoders` folders from your workshop leader, or download them yourself:
+Copy the `models` folders from your workshop leader, or download them yourself:
 
 ```bash
-python3.10 download_encoder.py
 python3.10 download_models.py
 ```
 
