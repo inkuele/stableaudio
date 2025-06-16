@@ -79,7 +79,11 @@ You must install CUDA for your graphic card.
 ### Windows
 
 For Windows you have to specify the installation of pytorch libraries for your CUDA version
-In our case, we installed CUDA 12.9 and we installed pytorth 12.1 version:
+In our case, we installed CUDA 12.9 
+```
+https://developer.nvidia.com/cuda-downloads?target_os=Windows&target_arch=x86_64&target_version=11&target_type=exe_local
+```
+and then we installed pytorth 12.1 version:
 
 ```bash
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
