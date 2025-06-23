@@ -54,6 +54,7 @@ def parse_ckpt(sel: str):
 # Globals
 model = None
 model_config = None
+# default sample rate; will be overwritten by model_config
 default_sample_rate = 44100
 
 # --- Load model callback ---
@@ -92,17 +93,15 @@ PRESETS = {
     "Modular Synth": "modular synth arpeggio in stereo, 90 BPM"
 }
 
-
 # --- Audio generation ---
-# Similar to `generate_audio_batch` from the HF example: loop per prompt for stochastic diversity
 stop_requested = False
+prompt_history = []
 
 def stop_generation():
     global stop_requested
     stop_requested = True
     return gr.update(value="🛑 Stop requested...")
 
-prompt_history = []
 
 def generate_audio(
     prompts, neg_prompt, start_sec, duration_sec,
@@ -118,20 +117,14 @@ def generate_audio(
     previews, files, statuses = [], [], []
     start_total = time.time()
 
-    for i, prompt in enumerate(lines):
+    for prompt in lines:
         if stop_requested:
             statuses.append("🛑 Generation stopped by user.")
             break
 
-        # reseed for diversity
-        # torch.manual_seed(int(time.time() * 1e6) % (2**32))
-        #seed = random.getrandbits(32)
-        #seed = random.
-#        seed = seed if seed != -1 else np.random.randint(0, 2**31 - 1)
         seed = random.randint(0, 2**31 - 1)
-#        torch.manual_seed(seed)
         print(f"🔀 reseeded with random seed {seed}")
-        # build positive conditioning list
+
         cond_pos = [{
             "prompt": prompt,
             "seconds_start": start_sec,
@@ -146,68 +139,69 @@ def generate_audio(
                 "weight": mix
             })
 
-        # build negative conditioning list
-        cond_neg = []
+        # prepare negative conditioning
+        cond_neg = None
         if neg_prompt and neg_prompt.strip():
             cond_neg = [{
                 "prompt": neg_prompt,
                 "seconds_start": start_sec,
-                "seconds_total": duration_sec,
-                "weight": 1.0
+                "seconds_total": duration_sec
             }]
 
-                # combine positive + negative entries into single conditioning list
-        cond = cond_pos.copy()
-        if neg_prompt and neg_prompt.strip():
-            cond.append({
-                "prompt": neg_prompt,
-                "seconds_start": start_sec,
-                "seconds_total": duration_sec,
-                "weight": -cfg
-            })
-
-                # generate
+        # generate with or without negative conditioning
         try:
-            out = generate_diffusion_cond(
-                model=model,
-                steps=steps,
-                cfg_scale=cfg,
-                conditioning=cond,
-                sample_size=int(duration_sec * sr),
-                sigma_min=sigma_min,
-                sigma_max=sigma_max,
-                sampler_type=sampler,
-                device=device,
-                seed=seed
-            )
-        except RuntimeError as e:
-            # fallback for models that do not support negative conditioning (shape mismatch)
-            err = str(e)
-            if 'size of tensor a' in err or 'Conditioner key' in err:
-                statuses.append('⚠️ Negative prompt unsupported, retrying without it.')
-                # retry without negative weights
-                cond = cond_pos.copy()
+            if cond_neg:
                 out = generate_diffusion_cond(
                     model=model,
                     steps=steps,
                     cfg_scale=cfg,
-                    conditioning=cond,
+                    conditioning=cond_pos,
+                    negative_conditioning=cond_neg,
                     sample_size=int(duration_sec * sr),
                     sigma_min=sigma_min,
                     sigma_max=sigma_max,
                     sampler_type=sampler,
-                    device=device
+                    device=device,
+                    seed=seed
+                )
+            else:
+                out = generate_diffusion_cond(
+                    model=model,
+                    steps=steps,
+                    cfg_scale=cfg,
+                    conditioning=cond_pos,
+                    sample_size=int(duration_sec * sr),
+                    sigma_min=sigma_min,
+                    sigma_max=sigma_max,
+                    sampler_type=sampler,
+                    device=device,
+                    seed=seed
+                )
+        except RuntimeError as e:
+            err = str(e)
+            if 'size of tensor a' in err or 'Conditioner key' in err:
+                statuses.append('⚠️ Negative prompt unsupported, retrying without it.')
+                out = generate_diffusion_cond(
+                    model=model,
+                    steps=steps,
+                    cfg_scale=cfg,
+                    conditioning=cond_pos,
+                    sample_size=int(duration_sec * sr),
+                    sigma_min=sigma_min,
+                    sigma_max=sigma_max,
+                    sampler_type=sampler,
+                    device=device,
+                    seed=seed
                 )
             else:
                 raise
 
-        # post-process audio (single sample)
+        # post-process audio
         audio = rearrange(out, "b d n -> d (b n)").float().cpu()
         audio = audio / (audio.abs().max() + 1e-5)
         audio_int16 = audio.clamp(-1, 1).mul(32767).to(torch.int16)
 
         elapsed = time.time() - start_total
-        # sanitize prompt to a filesystem-safe name (keep full length)
         safe = re.sub(r'[^\w]+', '_', prompt.lower()).strip('_')
         fname = f"{int(elapsed)}s_{safe}.wav"
         path = os.path.join(tempfile.gettempdir(), fname)
@@ -219,11 +213,9 @@ def generate_audio(
         prompt_history.append(entry)
         statuses.append(entry)
 
-    # pad preview list to 3
     while len(previews) < 3:
         previews.append(None)
 
-    # package into ZIP
     zip_path = os.path.join(tempfile.gettempdir(), f"audio_{int(time.time())}.zip")
     with zipfile.ZipFile(zip_path, "w") as zf:
         for f in files:
@@ -254,7 +246,6 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
             smin_sl = gr.Slider(0.0, 1.0, value=0.3, label="Sigma Min")
             smax_sl = gr.Slider(0.0, 1000.0, value=500.0, label="Sigma Max")
             sr_dd = gr.Dropdown(label="Sample Rate", choices=[16000,22050,32000,44100], value=default_sample_rate)
-            # batch_cb = gr.Checkbox(label="Batch mode", value=False)
             audio_up = gr.Audio(label="Upload Audio", type="filepath")
             mix_sl = gr.Slider(0.0, 1.0, value=0.5, label="Audio Mix")
         with gr.Column():
@@ -277,7 +268,6 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
             smin_sl,
             smax_sl,
             sr_dd,
-            # batch_cb,
             audio_up,
             mix_sl
         ],
@@ -288,7 +278,6 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        # doesn't have to be reachable
         s.connect(("10.255.255.255", 1))
         IP = s.getsockname()[0]
     except Exception:
@@ -298,7 +287,6 @@ def get_local_ip():
     return IP
 
 if __name__ == '__main__':
-#    ui.queue().launch(share=False, server_name="0.0.0.0", server_port=7860)
     local_ip = get_local_ip()
     print(f"🌐 Serving Gradio interface on: http://{local_ip}:7860")
     ui.queue().launch(share=False, server_name=local_ip, server_port=7860)

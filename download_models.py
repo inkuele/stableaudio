@@ -6,15 +6,11 @@ MODEL_DIR = "./models"
 
 # List of models to download
 models = [
-#    "stabilityai/stable-audio-open-1.0",
-    "stabilityai/stable-audio-open-small",
-#    "PsiPi/audio",
-#    "RoyalCities/RC_Infinite_Pianos",
-#    "RoyalCities/Vocal_Textures_Main",
-#    "Nekochu/stable-audio-open-1.0-Music",
-#    "santifiorino/SAO-Instrumental-Finetune",
-#    "adlb/Audialab_EDM_Elements",
-#    "bleepybloops/sao_vae_tuned_100k"
+    "stabilityai/stable-audio-open-1.0",
+    "RoyalCities/RC_Infinite_Pianos",
+    "RoyalCities/Vocal_Textures_Main",
+    "santifiorino/SAO-Instrumental-Finetune",
+    "adlb/Audialab_EDM_Elements",
 ]
 
 os.makedirs(MODEL_DIR, exist_ok=True)
