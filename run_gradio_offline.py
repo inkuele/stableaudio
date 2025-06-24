@@ -69,10 +69,11 @@ def load_model(selection: str):
     state = load_ckpt_state_dict(ckpt_path)
     m.load_state_dict(state)
     m.eval()
-    try:
-        m = torch.compile(m)
-    except Exception as e:
-        print("Warning: torch.compile() failed, running without compilation.", e)
+    # skipping torch.compile to preserve model attributes
+# try:
+#     m = torch.compile(m)
+# except Exception as e:
+#     print("Warning: torch.compile() failed, running without compilation.", e)"Warning: torch.compile() failed, running without compilation.", e)
     model = m.to(device)
     default_sample_rate = model_config.get('sample_rate', 44100)
     msg = f"Loaded: {selection} @ {default_sample_rate}Hz on {device}"
@@ -122,24 +123,36 @@ def generate_audio(
             statuses.append("🛑 Generation stopped by user.")
             break
 
+        # reseed for diversity
         seed = random.randint(0, 2**31 - 1)
         print(f"🔀 reseeded with random seed {seed}")
 
+        # positive conditioning
         cond_pos = [{
             "prompt": prompt,
             "seconds_start": start_sec,
             "seconds_total": duration_sec,
-            "weight": 1.0 - mix
+            "weight": 1.0
         }]
-        if upload and mix > 0:
-            cond_pos.append({
-                "audio_filepath": upload,
-                "seconds_start": start_sec,
-                "seconds_total": duration_sec,
-                "weight": mix
-            })
 
-        # prepare negative conditioning
+        # prepare init audio if mixing
+        init_audio_tuple = None
+        # init_noise_level: fraction of original noise (1=full original, 0=none)
+        init_noise_level = mix
+        if upload and mix > 0:
+            wav, wav_sr = torchaudio.load(upload)
+            if wav_sr != sr:
+                wav = torchaudio.functional.resample(wav, orig_freq=wav_sr, new_freq=sr)
+            wav = wav.mean(dim=0, keepdim=True)
+            desired_len = int(duration_sec * sr)
+            if wav.shape[1] < desired_len:
+                pad = desired_len - wav.shape[1]
+                wav = torch.nn.functional.pad(wav, (0, pad))
+            else:
+                wav = wav[:, :desired_len]
+            init_audio_tuple = (sr, wav.to(device))
+
+        # negative conditioning
         cond_neg = None
         if neg_prompt and neg_prompt.strip():
             cond_neg = [{
@@ -148,35 +161,23 @@ def generate_audio(
                 "seconds_total": duration_sec
             }]
 
-        # generate with or without negative conditioning
+        # generate audio
         try:
-            if cond_neg:
-                out = generate_diffusion_cond(
-                    model=model,
-                    steps=steps,
-                    cfg_scale=cfg,
-                    conditioning=cond_pos,
-                    negative_conditioning=cond_neg,
-                    sample_size=int(duration_sec * sr),
-                    sigma_min=sigma_min,
-                    sigma_max=sigma_max,
-                    sampler_type=sampler,
-                    device=device,
-                    seed=seed
-                )
-            else:
-                out = generate_diffusion_cond(
-                    model=model,
-                    steps=steps,
-                    cfg_scale=cfg,
-                    conditioning=cond_pos,
-                    sample_size=int(duration_sec * sr),
-                    sigma_min=sigma_min,
-                    sigma_max=sigma_max,
-                    sampler_type=sampler,
-                    device=device,
-                    seed=seed
-                )
+            out = generate_diffusion_cond(
+                model=model,
+                steps=steps,
+                cfg_scale=cfg,
+                conditioning=cond_pos,
+                negative_conditioning=cond_neg,
+                sample_size=int(duration_sec * sr),
+                sigma_min=sigma_min,
+                sigma_max=sigma_max,
+                sampler_type=sampler,
+                device=device,
+                seed=seed,
+                init_audio=init_audio_tuple,
+                init_noise_level=init_noise_level
+            )
         except RuntimeError as e:
             err = str(e)
             if 'size of tensor a' in err or 'Conditioner key' in err:
@@ -191,12 +192,14 @@ def generate_audio(
                     sigma_max=sigma_max,
                     sampler_type=sampler,
                     device=device,
-                    seed=seed
+                    seed=seed,
+                    init_audio=init_audio_tuple,
+                    init_noise_level=init_noise_level
                 )
             else:
                 raise
 
-        # post-process audio
+        # post-process
         audio = rearrange(out, "b d n -> d (b n)").float().cpu()
         audio = audio / (audio.abs().max() + 1e-5)
         audio_int16 = audio.clamp(-1, 1).mul(32767).to(torch.int16)
@@ -216,6 +219,7 @@ def generate_audio(
     while len(previews) < 3:
         previews.append(None)
 
+    # package zip
     zip_path = os.path.join(tempfile.gettempdir(), f"audio_{int(time.time())}.zip")
     with zipfile.ZipFile(zip_path, "w") as zf:
         for f in files:
@@ -247,7 +251,7 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
             smax_sl = gr.Slider(0.0, 1000.0, value=500.0, label="Sigma Max")
             sr_dd = gr.Dropdown(label="Sample Rate", choices=[16000,22050,32000,44100], value=default_sample_rate)
             audio_up = gr.Audio(label="Upload Audio", type="filepath")
-            mix_sl = gr.Slider(0.0, 1.0, value=0.5, label="Audio Mix")
+            mix_sl = gr.Slider(0.1, 100.0, value=50.0, step=0.1, label="Audio Mix")
         with gr.Column():
             aud1 = gr.Audio(label="Preview 1", type="filepath")
             aud2 = gr.Audio(label="Preview 2", type="filepath")
