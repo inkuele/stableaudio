@@ -70,10 +70,10 @@ def load_model(selection: str):
     m.load_state_dict(state)
     m.eval()
     # skipping torch.compile to preserve model attributes
-# try:
-#     m = torch.compile(m)
-# except Exception as e:
-#     print("Warning: torch.compile() failed, running without compilation.", e)"Warning: torch.compile() failed, running without compilation.", e)
+    try:
+        m = torch.compile(m)
+    except Exception as e:
+        print("Warning: torch.compile() failed, running without compilation.", e)
     model = m.to(device)
     default_sample_rate = model_config.get('sample_rate', 44100)
     msg = f"Loaded: {selection} @ {default_sample_rate}Hz on {device}"
@@ -163,30 +163,13 @@ def generate_audio(
 
         # generate audio
         try:
-            out = generate_diffusion_cond(
-                model=model,
-                steps=steps,
-                cfg_scale=cfg,
-                conditioning=cond_pos,
-                negative_conditioning=cond_neg,
-                sample_size=int(duration_sec * sr),
-                sigma_min=sigma_min,
-                sigma_max=sigma_max,
-                sampler_type=sampler,
-                device=device,
-                seed=seed,
-                init_audio=init_audio_tuple,
-                init_noise_level=init_noise_level
-            )
-        except RuntimeError as e:
-            err = str(e)
-            if 'size of tensor a' in err or 'Conditioner key' in err:
-                statuses.append('⚠️ Negative prompt unsupported, retrying without it.')
+            with torch.cuda.amp.autocast():
                 out = generate_diffusion_cond(
                     model=model,
                     steps=steps,
                     cfg_scale=cfg,
                     conditioning=cond_pos,
+                    negative_conditioning=cond_neg,
                     sample_size=int(duration_sec * sr),
                     sigma_min=sigma_min,
                     sigma_max=sigma_max,
@@ -196,6 +179,25 @@ def generate_audio(
                     init_audio=init_audio_tuple,
                     init_noise_level=init_noise_level
                 )
+        except RuntimeError as e:
+            err = str(e)
+            if 'size of tensor a' in err or 'Conditioner key' in err:
+                statuses.append('⚠️ Negative prompt unsupported, retrying without it.')
+                with torch.cuda.amp.autocast():
+                    out = generate_diffusion_cond(
+                        model=model,
+                        steps=steps,
+                        cfg_scale=cfg,
+                        conditioning=cond_pos,
+                        sample_size=int(duration_sec * sr),
+                        sigma_min=sigma_min,
+                        sigma_max=sigma_max,
+                        sampler_type=sampler,
+                        device=device,
+                        seed=seed,
+                        init_audio=init_audio_tuple,
+                        init_noise_level=init_noise_level
+                    )
             else:
                 raise
 
