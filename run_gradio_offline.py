@@ -6,6 +6,7 @@ import socket
 import time
 import tempfile
 import zipfile
+import subprocess
 
 import torch
 import torchaudio
@@ -63,19 +64,25 @@ def get_local_ip():
         s.close()
     return IP
 
-# --- GPU Usage Polling ---
+# --- GPU Usage Polling (via nvidia-smi) ---
 def get_gpu_usage(_=None):
-    if not torch.cuda.is_available():
-        return "<div>GPU unavailable</div>"
-    props = torch.cuda.get_device_properties(device)
-    total = props.total_memory
-    used = torch.cuda.memory_allocated(device)
-    pct = used / total * 100
-    return (
-        f"<div style='width:100%;height:1em;background:#eee;border:1px solid #ccc;'>"
-        f"<div style='width:{pct:.1f}%;height:1.2em;background:#0a0;'>{pct:.1f}%</div>"
-        f"</div>"
-    )
+    try:
+        out = subprocess.check_output([
+            'nvidia-smi',
+            '--query-gpu=memory.used,memory.total',
+            '--format=csv,noheader,nounits'
+        ])
+        used_mib, total_mib = out.decode().strip().split(',')
+        used = int(used_mib)
+        total = int(total_mib)
+        pct = used / total * 100
+        return (
+            f"<div style='width:100%;height:1em;background:#eee;border:1px solid #ccc;'>"
+            f"<div style='width:{pct:.1f}%;height:1.2em;background:#0a0;'>{pct:.1f}%</div>"
+            f"</div>"
+        )
+    except Exception:
+        return "<div>GPU usage unavailable</div>"
 
 # Globals
 model = None
@@ -239,7 +246,6 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
     gr.Markdown("## 🎵 Stable Audio (Offline)")
     with gr.Row():
         gen_btn = gr.Button("Generate")
-    #    stop_btn = gr.Button("🛑 Stop", variant="stop")
     with gr.Row():
         ckpt_dd = gr.Dropdown(label="Checkpoint", choices=ckpt_options, value=current_ckpt)
         status_tb = gr.Textbox(label="Status", value=model_status, interactive=False)
@@ -290,7 +296,6 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
         ],
         outputs=[aud1, aud2, aud3, zip_dl, hist]
     )
-    #stop_btn.click(stop_generation, inputs=[], outputs=[hist])
 
 if __name__ == '__main__':
     local_ip = get_local_ip()
