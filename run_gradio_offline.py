@@ -288,6 +288,6 @@ def get_local_ip():
 
 if __name__ == '__main__':
     local_ip = get_local_ip()
-    print(f"🌐 Serving Gradio interface on: http://{local_ip}:7860")
-    ui.queue().launch(share=False, server_name=local_ip, server_port=7860)
+    print(f"🌐 Serving Gradio interface on: http://{local_ip}:7880")
+    ui.queue().launch(share=False, server_name=local_ip, server_port=7880)
 
