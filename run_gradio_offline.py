@@ -51,10 +51,36 @@ if not ckpt_options:
 def parse_ckpt(sel: str):
     return sel.split('/', 1)
 
+# --- Get local IP ---
+def get_local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("10.255.255.255", 1))
+        IP = s.getsockname()[0]
+    except Exception:
+        IP = "127.0.0.1"
+    finally:
+        s.close()
+    return IP
+
+# --- GPU Usage Polling ---
+def get_gpu_usage(_=None):
+    if not torch.cuda.is_available():
+        return "<div>GPU unavailable</div>"
+    props = torch.cuda.get_device_properties(device)
+    total = props.total_memory
+    used = torch.cuda.memory_allocated(device)
+    pct = used / total * 100
+    return (
+        f"<div style='width:100%;height:1em;background:#eee;border:1px solid #ccc;'>"
+        f"<div style='width:{pct:.1f}%;height:1.2em;background:#0a0;'>{pct:.1f}%</div>"
+        f"</div>"
+    )
+
 # Globals
 model = None
 model_config = None
-# default sample rate; will be overwritten by model_config
+# default sample rate; overwritten by model_config
 default_sample_rate = 44100
 
 # --- Load model callback ---
@@ -69,11 +95,6 @@ def load_model(selection: str):
     state = load_ckpt_state_dict(ckpt_path)
     m.load_state_dict(state)
     m.eval()
-    # skipping torch.compile to preserve model attributes
-    try:
-        m = torch.compile(m)
-    except Exception as e:
-        print("Warning: torch.compile() failed, running without compilation.", e)
     model = m.to(device)
     default_sample_rate = model_config.get('sample_rate', 44100)
     msg = f"Loaded: {selection} @ {default_sample_rate}Hz on {device}"
@@ -123,34 +144,24 @@ def generate_audio(
             statuses.append("🛑 Generation stopped by user.")
             break
 
-        # reseed for diversity
         seed = random.randint(0, 2**31 - 1)
         print(f"🔀 reseeded with random seed {seed}")
 
         # positive conditioning
-        cond_pos = [{
+        cond = [{
             "prompt": prompt,
             "seconds_start": start_sec,
             "seconds_total": duration_sec,
-            "weight": 1.0
+            "weight": 1.0 - mix/100.0
         }]
-
-        # prepare init audio if mixing
-        init_audio_tuple = None
-        # init_noise_level: fraction of original noise (1=full original, 0=none)
-        init_noise_level = mix
+        # audio conditioning if upload
         if upload and mix > 0:
-            wav, wav_sr = torchaudio.load(upload)
-            if wav_sr != sr:
-                wav = torchaudio.functional.resample(wav, orig_freq=wav_sr, new_freq=sr)
-            wav = wav.mean(dim=0, keepdim=True)
-            desired_len = int(duration_sec * sr)
-            if wav.shape[1] < desired_len:
-                pad = desired_len - wav.shape[1]
-                wav = torch.nn.functional.pad(wav, (0, pad))
-            else:
-                wav = wav[:, :desired_len]
-            init_audio_tuple = (sr, wav.to(device))
+            cond.append({
+                "audio_filepath": upload,
+                "seconds_start": start_sec,
+                "seconds_total": duration_sec,
+                "weight": mix/100.0
+            })
 
         # negative conditioning
         cond_neg = None
@@ -161,23 +172,21 @@ def generate_audio(
                 "seconds_total": duration_sec
             }]
 
-        # generate audio
+        # generate audio with conditioning list
         try:
             with torch.cuda.amp.autocast():
                 out = generate_diffusion_cond(
                     model=model,
                     steps=steps,
                     cfg_scale=cfg,
-                    conditioning=cond_pos,
+                    conditioning=cond,
                     negative_conditioning=cond_neg,
                     sample_size=int(duration_sec * sr),
                     sigma_min=sigma_min,
                     sigma_max=sigma_max,
                     sampler_type=sampler,
                     device=device,
-                    seed=seed,
-                    init_audio=init_audio_tuple,
-                    init_noise_level=init_noise_level
+                    seed=seed
                 )
         except RuntimeError as e:
             err = str(e)
@@ -188,20 +197,17 @@ def generate_audio(
                         model=model,
                         steps=steps,
                         cfg_scale=cfg,
-                        conditioning=cond_pos,
+                        conditioning=cond,
                         sample_size=int(duration_sec * sr),
                         sigma_min=sigma_min,
                         sigma_max=sigma_max,
                         sampler_type=sampler,
                         device=device,
-                        seed=seed,
-                        init_audio=init_audio_tuple,
-                        init_noise_level=init_noise_level
+                        seed=seed
                     )
             else:
                 raise
 
-        # post-process
         audio = rearrange(out, "b d n -> d (b n)").float().cpu()
         audio = audio / (audio.abs().max() + 1e-5)
         audio_int16 = audio.clamp(-1, 1).mul(32767).to(torch.int16)
@@ -221,7 +227,6 @@ def generate_audio(
     while len(previews) < 3:
         previews.append(None)
 
-    # package zip
     zip_path = os.path.join(tempfile.gettempdir(), f"audio_{int(time.time())}.zip")
     with zipfile.ZipFile(zip_path, "w") as zf:
         for f in files:
@@ -234,10 +239,16 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
     gr.Markdown("## 🎵 Stable Audio (Offline)")
     with gr.Row():
         gen_btn = gr.Button("Generate")
-        stop_btn = gr.Button("🛑 Stop", variant="stop")
-        device_md = gr.Markdown(f"**Device:** `{device}`")
+    #    stop_btn = gr.Button("🛑 Stop", variant="stop")
+    with gr.Row():
         ckpt_dd = gr.Dropdown(label="Checkpoint", choices=ckpt_options, value=current_ckpt)
         status_tb = gr.Textbox(label="Status", value=model_status, interactive=False)
+    # place device and GPU bar just below the Generate button
+    with gr.Row():
+        device_md = gr.Markdown(f"**Device:** `{device}`   ")
+        gpu_bar = gr.HTML(get_gpu_usage())
+        gpu_timer = gr.Timer(value=1.0)
+        gpu_timer.tick(get_gpu_usage, [], gpu_bar)
     with gr.Row():
         with gr.Column(scale=3):
             preset_dd = gr.Dropdown(label="Preset", choices=[""] + list(PRESETS.keys()))
@@ -253,14 +264,14 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
             smax_sl = gr.Slider(0.0, 1000.0, value=500.0, label="Sigma Max")
             sr_dd = gr.Dropdown(label="Sample Rate", choices=[16000,22050,32000,44100], value=default_sample_rate)
             audio_up = gr.Audio(label="Upload Audio", type="filepath")
-            mix_sl = gr.Slider(0.1, 100.0, value=50.0, step=0.1, label="Audio Mix")
+            mix_sl = gr.Slider(0.0, 100.0, value=50.0, step=0.1, label="Audio Mix")
         with gr.Column():
             aud1 = gr.Audio(label="Preview 1", type="filepath")
             aud2 = gr.Audio(label="Preview 2", type="filepath")
             aud3 = gr.Audio(label="Preview 3", type="filepath")
             zip_dl = gr.File(label="Download ZIP")
             hist = gr.Textbox(label="History", lines=10)
-        ckpt_dd.change(load_model, inputs=[ckpt_dd], outputs=[status_tb])
+    ckpt_dd.change(load_model, inputs=[ckpt_dd], outputs=[status_tb])
     gen_btn.click(
         generate_audio,
         inputs=[
@@ -279,21 +290,10 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
         ],
         outputs=[aud1, aud2, aud3, zip_dl, hist]
     )
-    stop_btn.click(stop_generation, inputs=[], outputs=[hist])
-
-def get_local_ip():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("10.255.255.255", 1))
-        IP = s.getsockname()[0]
-    except Exception:
-        IP = "127.0.0.1"
-    finally:
-        s.close()
-    return IP
+    #stop_btn.click(stop_generation, inputs=[], outputs=[hist])
 
 if __name__ == '__main__':
     local_ip = get_local_ip()
     print(f"🌐 Serving Gradio interface on: http://{local_ip}:7880")
-    ui.queue(concurrency_count=4).launch(share=False, server_name=local_ip, server_port=7880)
+    ui.queue().launch(share=False, server_name=local_ip, server_port=7880)
 
