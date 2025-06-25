@@ -64,6 +64,15 @@ def get_local_ip():
         s.close()
     return IP
 
+# --- linear to exponential mapping for sliders ----
+def expo_mix(linear_value, exponent=2.0):
+    # normalize to [0,1]
+    t = linear_value / 100.0
+    # apply exponential curve
+    t_exp = t ** exponent
+    # if you need the result back on [0,100], multiply:
+    return t_exp * 100.0
+
 # --- GPU Usage Polling (via nvidia-smi) ---
 def get_gpu_usage(_=None):
     try:
@@ -285,6 +294,8 @@ with gr.Blocks(title="Stable Audio Offline") as ui:
             sr_dd = gr.Dropdown(label="Sample Rate", choices=[16000,22050,32000,44100], value=default_sample_rate)
             audio_up = gr.Audio(label="Upload Audio", type="filepath")
             mix_sl = gr.Slider(0.0, 100.0, value=50.0, step=0.1, label="Audio Mix")
+            mapped = gr.Number(label="Expo-Mapped Mix")
+            mix_sl.change(fn=expo_mix, inputs=mix_sl, outputs=mapped)
         with gr.Column():
             aud1 = gr.Audio(label="Preview 1", type="filepath")
             aud2 = gr.Audio(label="Preview 2", type="filepath")
