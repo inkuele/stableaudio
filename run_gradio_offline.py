@@ -155,20 +155,29 @@ def generate_audio(
         print(f"🔀 reseeded with random seed {seed}")
 
         # positive conditioning
-        cond = [{
+        cond_pos = [{
             "prompt": prompt,
             "seconds_start": start_sec,
             "seconds_total": duration_sec,
-            "weight": 1.0 - mix/100.0
+            "weight": 1.0
         }]
-        # audio conditioning if upload
+
+        # prepare init audio if mixing
+        init_audio_tuple = None
+        # init_noise_level: fraction of original noise (1=full original, 0=none)
+        init_noise_level = mix
         if upload and mix > 0:
-            cond.append({
-                "audio_filepath": upload,
-                "seconds_start": start_sec,
-                "seconds_total": duration_sec,
-                "weight": mix/100.0
-            })
+            wav, wav_sr = torchaudio.load(upload)
+            if wav_sr != sr:
+                wav = torchaudio.functional.resample(wav, orig_freq=wav_sr, new_freq=sr)
+            wav = wav.mean(dim=0, keepdim=True)
+            desired_len = int(duration_sec * sr)
+            if wav.shape[1] < desired_len:
+                pad = desired_len - wav.shape[1]
+                wav = torch.nn.functional.pad(wav, (0, pad))
+            else:
+                wav = wav[:, :desired_len]
+            init_audio_tuple = (sr, wav.to(device))
 
         # negative conditioning
         cond_neg = None
@@ -179,6 +188,7 @@ def generate_audio(
                 "seconds_total": duration_sec
             }]
 
+
         # generate audio with conditioning list
         try:
             with torch.cuda.amp.autocast():
@@ -186,14 +196,16 @@ def generate_audio(
                     model=model,
                     steps=steps,
                     cfg_scale=cfg,
-                    conditioning=cond,
+                    conditioning=cond_pos,
                     negative_conditioning=cond_neg,
                     sample_size=int(duration_sec * sr),
                     sigma_min=sigma_min,
                     sigma_max=sigma_max,
                     sampler_type=sampler,
                     device=device,
-                    seed=seed
+                    seed=seed,
+                    init_audio=init_audio_tuple,
+                    init_noise_level=init_noise_level
                 )
         except RuntimeError as e:
             err = str(e)
@@ -210,7 +222,9 @@ def generate_audio(
                         sigma_max=sigma_max,
                         sampler_type=sampler,
                         device=device,
-                        seed=seed
+                        seed=seed,
+                        init_audio=init_audio_tuple,
+                        init_noise_level=init_noise_level
                     )
             else:
                 raise
