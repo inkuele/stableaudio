@@ -34,7 +34,6 @@ print(f"Using device: {device}")
 
 # --- Checkpoint management ---
 MODEL_DIR = "models"
-
 def list_checkpoints():
     opts = []
     for folder in sorted(os.listdir(MODEL_DIR)):
@@ -87,7 +86,6 @@ def get_gpu_usage(_=None):
 # Globals
 model = None
 model_config = None
-# default sample rate; overwritten by model_config
 default_sample_rate = 44100
 
 # --- Load model callback ---
@@ -131,20 +129,26 @@ def stop_generation():
     stop_requested = True
     return gr.update(value="🛑 Stop requested...")
 
-
 def generate_audio(
     prompts, neg_prompt, start_sec, duration_sec,
     steps, cfg, sampler, sigma_min, sigma_max,
-    sr, upload, mix
+    sr, upload, mix,
+    style_transfer,      # ⬅️ STYLE TRANSFER
+    init_noise_level     # ⬅️ STYLE TRANSFER
 ):
     global stop_requested, prompt_history
     stop_requested = False
+
+    # Clamp σ-range
+    sigma_min = max(float(sigma_min), 1e-6)
+    sigma_max = max(float(sigma_max), sigma_min * 10.0)
+
     lines = [p.strip() for p in prompts.splitlines() if p.strip()]
     if not lines:
         return None, None, None, None, "No prompts provided."
 
     previews, files, statuses = [], [], []
-    start_total = time.time()
+    start_time = time.time()
 
     for prompt in lines:
         if stop_requested:
@@ -154,7 +158,7 @@ def generate_audio(
         seed = random.randint(0, 2**31 - 1)
         print(f"🔀 reseeded with random seed {seed}")
 
-        # positive conditioning
+        # Positive conditioning
         cond_pos = [{
             "prompt": prompt,
             "seconds_start": start_sec,
@@ -162,24 +166,39 @@ def generate_audio(
             "weight": 1.0
         }]
 
-        # prepare init audio if mixing
+        # Prepare init_audio and noise
         init_audio_tuple = None
-        # init_noise_level: fraction of original noise (1=full original, 0=none)
-        init_noise_level = mix
-        if upload and mix > 0:
+        noise_lvl = mix
+        if style_transfer and upload:   # ⬅️ STYLE TRANSFER
+            # Use the uploaded file as the style reference
             wav, wav_sr = torchaudio.load(upload)
             if wav_sr != sr:
                 wav = torchaudio.functional.resample(wav, orig_freq=wav_sr, new_freq=sr)
             wav = wav.mean(dim=0, keepdim=True)
-            desired_len = int(duration_sec * sr)
-            if wav.shape[1] < desired_len:
-                pad = desired_len - wav.shape[1]
-                wav = torch.nn.functional.pad(wav, (0, pad))
+            L = int(duration_sec * sr)
+            if wav.shape[1] < L:
+                wav = torch.nn.functional.pad(wav, (0, L - wav.shape[1]))
             else:
-                wav = wav[:, :desired_len]
+                wav = wav[:, :L]
             init_audio_tuple = (sr, wav.to(device))
+            noise_lvl = float(init_noise_level)   # ⬅️ STYLE TRANSFER
+            statuses.append(f"🎨 Style‐transfer @ noise lvl={noise_lvl:.2f}")  # feedback
 
-        # negative conditioning
+        elif upload and mix > 0:
+            # Legacy mix path
+            wav, wav_sr = torchaudio.load(upload)
+            if wav_sr != sr:
+                wav = torchaudio.functional.resample(wav, orig_freq=wav_sr, new_freq=sr)
+            wav = wav.mean(dim=0, keepdim=True)
+            L = int(duration_sec * sr)
+            if wav.shape[1] < L:
+                wav = torch.nn.functional.pad(wav, (0, L - wav.shape[1]))
+            else:
+                wav = wav[:, :L]
+            init_audio_tuple = (sr, wav.to(device))
+            noise_lvl = mix
+
+        # Negative conditioning
         cond_neg = None
         if neg_prompt and neg_prompt.strip():
             cond_neg = [{
@@ -188,53 +207,31 @@ def generate_audio(
                 "seconds_total": duration_sec
             }]
 
+        # Run diffusion
+        with torch.amp.autocast(device_type=device.type):
+            out = generate_diffusion_cond(
+                model=model,
+                steps=steps,
+                cfg_scale=cfg,
+                conditioning=cond_pos,
+                negative_conditioning=cond_neg,
+                sample_size=int(duration_sec * sr),
+                sigma_min=sigma_min,
+                sigma_max=sigma_max,
+                sampler_type=sampler,
+                device=device,
+                seed=seed,
+                init_audio=init_audio_tuple,
+                init_noise_level=noise_lvl
+            )
 
-        # generate audio with conditioning list
-        try:
-            with torch.cuda.amp.autocast():
-                out = generate_diffusion_cond(
-                    model=model,
-                    steps=steps,
-                    cfg_scale=cfg,
-                    conditioning=cond_pos,
-                    negative_conditioning=cond_neg,
-                    sample_size=int(duration_sec * sr),
-                    sigma_min=sigma_min,
-                    sigma_max=sigma_max,
-                    sampler_type=sampler,
-                    device=device,
-                    seed=seed,
-                    init_audio=init_audio_tuple,
-                    init_noise_level=init_noise_level
-                )
-        except RuntimeError as e:
-            err = str(e)
-            if 'size of tensor a' in err or 'Conditioner key' in err:
-                statuses.append('⚠️ Negative prompt unsupported, retrying without it.')
-                with torch.cuda.amp.autocast():
-                    out = generate_diffusion_cond(
-                        model=model,
-                        steps=steps,
-                        cfg_scale=cfg,
-                        conditioning=cond,
-                        sample_size=int(duration_sec * sr),
-                        sigma_min=sigma_min,
-                        sigma_max=sigma_max,
-                        sampler_type=sampler,
-                        device=device,
-                        seed=seed,
-                        init_audio=init_audio_tuple,
-                        init_noise_level=init_noise_level
-                    )
-            else:
-                raise
-
-        audio = rearrange(out, "b d n -> d (b n)").float().cpu()
+        # Post‐process
+        audio = rearrange(out, "b d n -> d (b n)").cpu().float()
         audio = audio / (audio.abs().max() + 1e-5)
         audio_int16 = audio.clamp(-1, 1).mul(32767).to(torch.int16)
 
-        elapsed = time.time() - start_total
-        safe = re.sub(r'[^\w]+', '_', prompt.lower()).strip('_')
+        elapsed = time.time() - start_time
+        safe = re.sub(r'[^\w]+', '_', prompt).strip('_')
         fname = f"{int(elapsed)}s_{safe}.wav"
         path = os.path.join(tempfile.gettempdir(), fname)
         torchaudio.save(path, audio_int16, sr)
@@ -245,68 +242,86 @@ def generate_audio(
         prompt_history.append(entry)
         statuses.append(entry)
 
+    # pad to 3 previews
     while len(previews) < 3:
         previews.append(None)
 
+    # zip up
     zip_path = os.path.join(tempfile.gettempdir(), f"audio_{int(time.time())}.zip")
     with zipfile.ZipFile(zip_path, "w") as zf:
         for f in files:
             zf.write(f, os.path.basename(f))
 
-    return previews[0], previews[1], previews[2], zip_path, "".join(statuses)
+    return previews[0], previews[1], previews[2], zip_path, "\n".join(statuses)
+
 
 # --- UI layout ---
 with gr.Blocks(title="Stable Audio Offline") as ui:
     gr.Markdown("## 🎵 Stable Audio (Offline)")
+
     with gr.Row():
         gen_btn = gr.Button("Generate")
+
     with gr.Row():
         ckpt_dd = gr.Dropdown(label="Checkpoint", choices=ckpt_options, value=current_ckpt)
         status_tb = gr.Textbox(label="Status", value=model_status, interactive=False)
-    # place device and GPU bar just below the Generate button
+
     with gr.Row():
-        device_md = gr.Markdown(f"**Device:** `{device}`   ")
+        gr.Markdown(f"**Device:** `{device}`")
         gpu_bar = gr.HTML(get_gpu_usage())
         gpu_timer = gr.Timer(value=1.0)
         gpu_timer.tick(get_gpu_usage, [], gpu_bar)
+
     with gr.Row():
         with gr.Column(scale=3):
             preset_dd = gr.Dropdown(label="Preset", choices=[""] + list(PRESETS.keys()))
             prompt_tb = gr.Textbox(label="Prompts (one per line)", lines=4)
             preset_dd.change(lambda p: PRESETS.get(p, ""), preset_dd, prompt_tb)
+
             neg_tb = gr.Textbox(label="Negative Prompt", lines=2)
             start_sl = gr.Slider(0, 60, value=0, label="Start (s)")
-            dur_sl = gr.Slider(1, 60, value=30, label="Duration (s)")
+            dur_sl   = gr.Slider(1, 60, value=30, label="Duration (s)")
             steps_sl = gr.Slider(20, 250, value=100, label="Steps")
-            cfg_sl = gr.Slider(1, 12, value=7, label="CFG Scale")
-            samp_dd = gr.Dropdown(label="Sampler", choices=["dpmpp-3m-sde","dpmpp-2m","euler","heun","lms"], value="dpmpp-3m-sde")
-            smin_sl = gr.Slider(0.0, 1.0, value=0.3, label="Sigma Min")
-            smax_sl = gr.Slider(0.0, 1000.0, value=500.0, label="Sigma Max")
-            sr_dd = gr.Dropdown(label="Sample Rate", choices=[16000,22050,32000,44100], value=default_sample_rate)
+            cfg_sl   = gr.Slider(1, 12, value=7, label="CFG Scale")
+            samp_dd  = gr.Dropdown(label="Sampler",
+                                   choices=["dpmpp-3m-sde","dpmpp-2m","euler","heun","lms"],
+                                   value="dpmpp-3m-sde")
+            smin_sl = gr.Slider(0.001, 1.0, value=0.3, label="Sigma Min")
+            smax_sl = gr.Slider(0.01, 1000.0, value=500.0, label="Sigma Max")
+            sr_dd   = gr.Dropdown(label="Sample Rate",
+                                  choices=[16000,22050,32000,44100],
+                                  value=default_sample_rate)
+
             audio_up = gr.Audio(label="Upload Audio", type="filepath")
-            mix_sl = gr.Slider(0.0, 100.0, value=50.0, step=0.1, label="Audio Mix")
+            mix_sl   = gr.Slider(0.0, 100.0, value=50.0, step=0.1, label="Audio Mix")
+
+            # ⬅️ STYLE TRANSFER UI
+            style_transfer_cb = gr.Checkbox(label="Use Upload for Style Transfer", value=False)
+            init_noise_sl     = gr.Slider(minimum=0.1, maximum=5.0, step=0.01,
+                                          value=0.9, label="Init Noise Level", visible=False)
+            # show/hide noise slider
+            style_transfer_cb.change(
+                lambda enabled: gr.update(visible=enabled),
+                inputs=[style_transfer_cb],
+                outputs=[init_noise_sl]
+            )
+
         with gr.Column():
-            aud1 = gr.Audio(label="Preview 1", type="filepath")
-            aud2 = gr.Audio(label="Preview 2", type="filepath")
-            aud3 = gr.Audio(label="Preview 3", type="filepath")
+            aud1   = gr.Audio(label="Preview 1", type="filepath")
+            aud2   = gr.Audio(label="Preview 2", type="filepath")
+            aud3   = gr.Audio(label="Preview 3", type="filepath")
             zip_dl = gr.File(label="Download ZIP")
-            hist = gr.Textbox(label="History", lines=10)
+            hist   = gr.Textbox(label="History", lines=10)
+
     ckpt_dd.change(load_model, inputs=[ckpt_dd], outputs=[status_tb])
     gen_btn.click(
         generate_audio,
         inputs=[
-            prompt_tb,
-            neg_tb,
-            start_sl,
-            dur_sl,
-            steps_sl,
-            cfg_sl,
-            samp_dd,
-            smin_sl,
-            smax_sl,
-            sr_dd,
-            audio_up,
-            mix_sl
+            prompt_tb, neg_tb, start_sl, dur_sl,
+            steps_sl, cfg_sl, samp_dd, smin_sl, smax_sl,
+            sr_dd, audio_up, mix_sl,
+            style_transfer_cb,      # ⬅️ STYLE TRANSFER
+            init_noise_sl           # ⬅️ STYLE TRANSFER
         ],
         outputs=[aud1, aud2, aud3, zip_dl, hist]
     )

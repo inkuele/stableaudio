@@ -9,6 +9,7 @@ local_models/*
 __pycache__/*
 encoders/*
 *.wav
+*.log
 *.spec
 *.DS_Store
 
