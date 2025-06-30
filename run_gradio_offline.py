@@ -24,16 +24,16 @@ from stable_audio_tools.inference.generation import generate_diffusion_cond
 # --- Device selection ---
 def get_device():
     if torch.backends.mps.is_available():
-        return torch.device("mps")
+        return torch.device('mps')
     if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
+        return torch.device('cuda')
+    return torch.device('cpu')
 
 device = get_device()
-print(f"Using device: {device}")
+print(f'Using device: {device}')
 
 # --- Checkpoint management ---
-MODEL_DIR = "models"
+MODEL_DIR = 'models'
 def list_checkpoints():
     opts = []
     for folder in sorted(os.listdir(MODEL_DIR)):
@@ -41,7 +41,7 @@ def list_checkpoints():
         if os.path.isdir(path):
             for fname in sorted(os.listdir(path)):
                 if fname.endswith('.ckpt'):
-                    opts.append(f"{folder}/{fname}")
+                    opts.append(f'{folder}/{fname}')
     return opts
 
 ckpt_options = list_checkpoints()
@@ -53,17 +53,17 @@ def parse_ckpt(sel: str):
 
 # --- Get local IP ---
 def get_local_ip():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        s.connect(("10.255.255.255", 1))
-        IP = s.getsockname()[0]
+        sock.connect(('10.255.255.255', 1))
+        ip = sock.getsockname()[0]
     except Exception:
-        IP = "127.0.0.1"
+        ip = '127.0.0.1'
     finally:
-        s.close()
-    return IP
+        sock.close()
+    return ip
 
-# --- GPU Usage Polling (via nvidia-smi) ---
+# --- GPU Usage Polling ---
 def get_gpu_usage(_=None):
     try:
         out = subprocess.check_output([
@@ -81,7 +81,7 @@ def get_gpu_usage(_=None):
             f"</div>"
         )
     except Exception:
-        return "<div>GPU usage unavailable</div>"
+        return '<div>GPU usage unavailable</div>'
 
 # Globals
 model = None
@@ -106,18 +106,18 @@ def load_model(selection: str):
     print(msg)
     return msg
 
-# Initialize default
-preferred = [c for c in ckpt_options if c.startswith("stabilityai__stable-audio-open-1.0/")]
+# Initialize default checkpoint
+preferred = [c for c in ckpt_options if c.startswith('stabilityai__stable-audio-open-1.0/')]
 current_ckpt = preferred[0] if preferred else ckpt_options[0]
 model_status = load_model(current_ckpt)
 
 # --- Presets ---
 PRESETS = {
-    "Ambient": "ambient drone, reverb tails, 60 BPM",
-    "Tech House Loop": "128 BPM tech house drum loop, dry mix",
-    "Lofi Beat": "lofi hip hop beat with vinyl crackle, 75 BPM",
-    "Glitchy IDM": "glitchy IDM with bitcrush textures, 100 BPM",
-    "Modular Synth": "modular synth arpeggio in stereo, 90 BPM"
+    'Ambient': 'ambient drone, reverb tails, 60 BPM',
+    'Tech House Loop': '128 BPM tech house drum loop, dry mix',
+    'Lofi Beat': 'lofi hip hop beat with vinyl crackle, 75 BPM',
+    'Glitchy IDM': 'glitchy IDM with bitcrush textures, 100 BPM',
+    'Modular Synth': 'modular synth arpeggio in stereo, 90 BPM'
 }
 
 # --- Audio generation ---
@@ -127,74 +127,72 @@ prompt_history = []
 def stop_generation():
     global stop_requested
     stop_requested = True
-    return gr.update(value="🛑 Stop requested...")
+    return gr.update(value='🛑 Stop requested...')
 
 def generate_audio(
     prompts, neg_prompt, start_sec, duration_sec,
     steps, cfg, sampler, sigma_min, sigma_max,
-    sr, upload, mix, style_transfer,
+    sr, upload, style_transfer,
     init_noise_level
 ):
     global stop_requested, prompt_history
     stop_requested = False
 
-    # Clamp σ-range
     sigma_min = max(float(sigma_min), 1e-6)
     sigma_max = max(float(sigma_max), sigma_min * 10.0)
 
     lines = [p.strip() for p in prompts.splitlines() if p.strip()]
     if not lines:
-        return None, None, None, None, "No prompts provided."
+        return None, None, None, None, 'No prompts provided.'
 
     previews, files, statuses = [], [], []
     start_time = time.time()
 
     for prompt in lines:
         if stop_requested:
-            statuses.append("🛑 Generation stopped by user.")
+            statuses.append('🛑 Generation stopped by user.')
             break
 
         seed = random.randint(0, 2**31 - 1)
-        print(f"🔀 reseeded with random seed {seed}")
+        print(f'🔀 reseeded with random seed {seed}')
 
+        # Positive conditioning
         cond_pos = [{
-            "prompt": prompt,
-            "seconds_start": start_sec,
-            "seconds_total": duration_sec,
-            "weight": 1.0
+            'prompt': prompt,
+            'seconds_start': start_sec,
+            'seconds_total': duration_sec,
+            'weight': 1.0
         }]
 
+        # Prepare init audio
         init_audio_tuple = None
-        noise_lvl = mix
-
-        # ⬅️ STYLE TRANSFER
-        if style_transfer and upload:
+        noise_lvl = float(init_noise_level)
+        if upload:
             wav, wav_sr = torchaudio.load(upload)
             if wav_sr != sr:
                 wav = torchaudio.functional.resample(wav, orig_freq=wav_sr, new_freq=sr)
             wav = wav.mean(dim=0, keepdim=True)
             L = int(duration_sec * sr)
-            wav = wav[:, :L] if wav.shape[1] >= L else torch.nn.functional.pad(wav, (0, L - wav.shape[1]))
-            init_audio_tuple = (sr, wav.to(device))
-            noise_lvl = float(init_noise_level)
-            statuses.append(f"🎨 Style-transfer (noise={noise_lvl:.2f})")
-        elif upload and mix > 0:
-            wav, wav_sr = torchaudio.load(upload)
-            if wav_sr != sr:
-                wav = torchaudio.functional.resample(wav, orig_freq=wav_sr, new_freq=sr)
-            wav = wav.mean(dim=0, keepdim=True)
-            L = int(duration_sec * sr)
-            wav = wav[:, :L] if wav.shape[1] >= L else torch.nn.functional.pad(wav, (0, L - wav.shape[1]))
+            if wav.shape[1] < L:
+                wav = torch.nn.functional.pad(wav, (0, L - wav.shape[1]))
+            else:
+                wav = wav[:, :L]
             init_audio_tuple = (sr, wav.to(device))
 
+        # Status update
+        mode = 'Style-transfer' if style_transfer else 'Re-synthesis'
+        statuses.append(f'🔄 {mode} (noise={noise_lvl:.2f})')
+
+        # Negative conditioning
         cond_neg = None
         if neg_prompt and neg_prompt.strip():
             cond_neg = [{
-                "prompt": neg_prompt,
-                "seconds_start": start_sec,
-                "seconds_total": duration_sec
+                'prompt': neg_prompt,
+                'seconds_start': start_sec,
+                'seconds_total': duration_sec
             }]
 
+        # Diffusion sampling (conditional)
         with torch.amp.autocast(device_type=device.type):
             out = generate_diffusion_cond(
                 model=model,
@@ -212,42 +210,44 @@ def generate_audio(
                 init_noise_level=noise_lvl
             )
 
-        audio = rearrange(out, "b d n -> d (b n)").float().cpu()
+        # Post-process audio
+        audio = rearrange(out, 'b d n -> d (b n)').float().cpu()
         audio = audio / (audio.abs().max() + 1e-5)
         audio_int16 = audio.clamp(-1, 1).mul(32767).to(torch.int16)
 
         elapsed = time.time() - start_time
         safe = re.sub(r'[^\w]+', '_', prompt).strip('_')
-        fname = f"{int(elapsed)}s_{safe}.wav"
+        fname = f'{int(elapsed)}s_{safe}.wav'
         path = os.path.join(tempfile.gettempdir(), fname)
         torchaudio.save(path, audio_int16, sr)
 
         previews.append(path)
         files.append(path)
-        entry = f"{prompt}  ⏱ {elapsed:.1f}s"
+        entry = f'{prompt}  ⏱ {elapsed:.1f}s'
         prompt_history.append(entry)
         statuses.append(entry)
 
+    # Ensure three previews
     while len(previews) < 3:
         previews.append(None)
 
-    zip_path = os.path.join(tempfile.gettempdir(), f"audio_{int(time.time())}.zip")
-    with zipfile.ZipFile(zip_path, "w") as zf:
-        for f in files:
-            zf.write(f, os.path.basename(f))
+    # Create ZIP archive
+    zip_path = os.path.join(tempfile.gettempdir(), f'audio_{int(time.time())}.zip')
+    with zipfile.ZipFile(zip_path, 'w') as zf:
+        for fpath in files:
+            zf.write(fpath, os.path.basename(fpath))
 
-    return previews[0], previews[1], previews[2], zip_path, "\n".join(statuses)
-
+    return previews[0], previews[1], previews[2], zip_path, '\n'.join(statuses)
 
 # --- UI layout ---
-with gr.Blocks(title="Stable Audio Open - Inküle") as ui:
-    gr.Markdown("## 🎵 Stable Audio Open - Inküle")
+with gr.Blocks(title='Stable Audio Open - Inküle') as ui:
+    gr.Markdown('## 🎵 Stable Audio Open - Inküle')
 
     with gr.Row():
-        gen_btn = gr.Button("Generate")
+        gen_btn = gr.Button('Generate')
     with gr.Row():
-        ckpt_dd = gr.Dropdown(label="Checkpoint", choices=ckpt_options, value=current_ckpt)
-        status_tb = gr.Textbox(label="Status", value=model_status, interactive=False)
+        ckpt_dd = gr.Dropdown(label='Checkpoint', choices=ckpt_options, value=current_ckpt)
+        status_tb = gr.Textbox(label='Status', value=model_status, interactive=False)
     with gr.Row():
         gr.Markdown(f"**Device:** `{device}`")
         gpu_bar = gr.HTML(get_gpu_usage())
@@ -255,45 +255,33 @@ with gr.Blocks(title="Stable Audio Open - Inküle") as ui:
 
     with gr.Row():
         with gr.Column(scale=3):
-            prompt_tb = gr.Textbox(label="Prompts (one per line)", lines=4)
-            preset_dd = gr.Dropdown(label="Preset", choices=[""] + list(PRESETS.keys()))
-            preset_dd.change(lambda p: PRESETS.get(p, ""), preset_dd, prompt_tb)
+            prompt_tb = gr.Textbox(label='Prompts (one per line)', lines=4)
+            preset_dd = gr.Dropdown(label='Preset', choices=[''] + list(PRESETS.keys()))
+            preset_dd.change(lambda p: PRESETS.get(p, ''), preset_dd, prompt_tb)
 
-            neg_tb    = gr.Textbox(label="Negative Prompt", lines=2)
-            start_sl  = gr.Slider(0, 60, value=0,   label="Start (s)")
-            dur_sl    = gr.Slider(1, 60, value=30,  label="Duration (s)")
-            steps_sl  = gr.Slider(20,250,value=100, label="Steps")
-            cfg_sl    = gr.Slider(1, 12, value=7,   label="CFG Scale")
-            samp_dd   = gr.Dropdown(label="Sampler",
-                                    choices=["dpmpp-3m-sde","dpmpp-2m","euler","heun","lms"],
-                                    value="dpmpp-3m-sde")
-            smin_sl   = gr.Slider(0.001,1.0,value=0.3,  label="Sigma Min")
-            smax_sl   = gr.Slider(0.01,1000.0,value=500.0,label="Sigma Max")
-            sr_dd     = gr.Dropdown(label="Sample Rate",
-                                    choices=[16000,22050,32000,44100],
-                                    value=default_sample_rate)
+            neg_tb    = gr.Textbox(label='Negative Prompt', lines=2)
+            start_sl  = gr.Slider(0, 60, value=0, label='Start (s)')
+            dur_sl    = gr.Slider(1, 60, value=30, label='Duration (s)')
+            steps_sl  = gr.Slider(20, 250, value=100, label='Steps')
+            cfg_sl    = gr.Slider(1, 12, value=7, label='CFG Scale')
+            samp_dd   = gr.Dropdown(label='Sampler', choices=['dpmpp-3m-sde','dpmpp-2m','euler','heun','lms'], value='dpmpp-3m-sde')
+            smin_sl   = gr.Slider(0.001, 1.0, value=0.3, label='Sigma Min')
+            smax_sl   = gr.Slider(0.01, 1000.0, value=500.0, label='Sigma Max')
+            sr_dd     = gr.Dropdown(label='Sample Rate', choices=[16000,22050,32000,44100], value=default_sample_rate)
 
-            audio_up  = gr.Audio(label="Upload Audio", type="filepath")
-            mix_sl    = gr.Slider(0.0,100.0,value=5.0,step=0.1,label="Audio Mix")
-
-            # ⬅️ STYLE TRANSFER UI
-            style_transfer_cb = gr.Checkbox(label="Use Upload for Style Transfer", value=False)
-            init_noise_sl     = gr.Slider(0.0,5.0,value=2.0,step=0.01,label="Init Noise Level", visible=False)
-            style_transfer_cb.change(
-                lambda en: gr.update(visible=en),
-                inputs=[style_transfer_cb],
-                outputs=[init_noise_sl]
-            )
+            audio_up  = gr.Audio(label='Upload Audio', type='filepath')
+            style_transfer_cb = gr.Checkbox(label='Use Upload for Style Transfer', value=False)
+            init_noise_sl     = gr.Slider(0.0, 5.0, value=2.0, step=0.01, label='Init Noise Level')
 
         with gr.Column():
-            aud1   = gr.Audio(label="Preview 1", type="filepath")
-            use1   = gr.Button("Use Preview 1 as Input")
-            aud2   = gr.Audio(label="Preview 2", type="filepath")
-            use2   = gr.Button("Use Preview 2 as Input")
-            aud3   = gr.Audio(label="Preview 3", type="filepath")
-            use3   = gr.Button("Use Preview 3 as Input")
-            zip_dl = gr.File(label="Download ZIP")
-            hist   = gr.Textbox(label="History", lines=10)
+            aud1 = gr.Audio(label='Preview 1', type='filepath', interactive=False)
+            use1 = gr.Button('Use Preview 1 as Input')
+            aud2 = gr.Audio(label='Preview 2', type='filepath', interactive=False)
+            use2 = gr.Button('Use Preview 2 as Input')
+            aud3 = gr.Audio(label='Preview 3', type='filepath', interactive=False)
+            use3 = gr.Button('Use Preview 3 as Input')
+            zip_dl = gr.File(label='Download ZIP')
+            hist = gr.Textbox(label='History', lines=10)
 
     # Handlers
     ckpt_dd.change(load_model, [ckpt_dd], [status_tb])
@@ -302,19 +290,18 @@ with gr.Blocks(title="Stable Audio Open - Inküle") as ui:
         inputs=[
             prompt_tb, neg_tb, start_sl, dur_sl,
             steps_sl, cfg_sl, samp_dd, smin_sl, smax_sl,
-            sr_dd, audio_up, mix_sl, style_transfer_cb,
+            sr_dd, audio_up, style_transfer_cb,
             init_noise_sl
         ],
         outputs=[aud1, aud2, aud3, zip_dl, hist]
     )
 
-    # “Use Preview as Input” feature
     use1.click(lambda p: p, inputs=[aud1], outputs=[audio_up])
     use2.click(lambda p: p, inputs=[aud2], outputs=[audio_up])
     use3.click(lambda p: p, inputs=[aud3], outputs=[audio_up])
 
 if __name__ == '__main__':
     local_ip = get_local_ip()
-    print(f"🌐 Serving Gradio interface on: http://{local_ip}:7880")
+    print(f'Serving Gradio interface on: http://{local_ip}:7880')
     ui.queue().launch(share=False, server_name=local_ip, server_port=7880)
 
