@@ -21,9 +21,9 @@ from stable_audio_tools.models.factory import create_model_from_config
 from stable_audio_tools.models.utils import load_ckpt_state_dict
 from stable_audio_tools.inference.generation import generate_diffusion_cond
 
-# --- Device selection ---
+# Determine device
 def get_device():
-    if torch.backends.mps.is_available():
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
         return torch.device('mps')
     if torch.cuda.is_available():
         return torch.device('cuda')
@@ -134,7 +134,9 @@ def generate_audio(
     steps, cfg, sampler, sigma_min, sigma_max,
     sr, upload, init_noise_level
 ):
-    global stop_requested, prompt_history
+    global stop_requested, prompt_history, generation_counter
+
+    generation_counter = 1
     stop_requested = False
 
     sigma_min = max(float(sigma_min), 1e-6)
@@ -148,11 +150,8 @@ def generate_audio(
     start_time = time.time()
 
     for prompt in lines:
-        if stop_requested:
-            statuses.append('🛑 Generation stopped by user.')
-            break
-
-        seed = random.randint(0, 2**31 - 1)
+        seed = random.randint(0, 2**32 - 1)
+        random.seed(seed)
         print(f'🔀 reseeded with random seed {seed}')
 
         # Positive conditioning
@@ -215,7 +214,9 @@ def generate_audio(
 
         elapsed = time.time() - start_time
         safe = re.sub(r'[^\w]+', '_', prompt).strip('_')
-        fname = f'{int(elapsed)}s_{safe}.wav'
+
+        fname = f'{generation_counter:02d}_{safe}.wav'
+        generation_counter += 1
         path = os.path.join(tempfile.gettempdir(), fname)
         torchaudio.save(path, audio_int16, sr)
 
