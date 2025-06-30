@@ -132,8 +132,7 @@ def stop_generation():
 def generate_audio(
     prompts, neg_prompt, start_sec, duration_sec,
     steps, cfg, sampler, sigma_min, sigma_max,
-    sr, upload, style_transfer,
-    init_noise_level
+    sr, upload, init_noise_level
 ):
     global stop_requested, prompt_history
     stop_requested = False
@@ -180,8 +179,7 @@ def generate_audio(
             init_audio_tuple = (sr, wav.to(device))
 
         # Status update
-        mode = 'Style-transfer' if style_transfer else 'Re-synthesis'
-        statuses.append(f'🔄 {mode} (noise={noise_lvl:.2f})')
+        statuses.append(f'🔄 (noise={noise_lvl:.2f})')
 
         # Negative conditioning
         cond_neg = None
@@ -270,7 +268,6 @@ with gr.Blocks(title='Stable Audio Open - Inküle') as ui:
             sr_dd     = gr.Dropdown(label='Sample Rate', choices=[16000,22050,32000,44100], value=default_sample_rate)
 
             audio_up  = gr.Audio(label='Upload Audio', type='filepath')
-            style_transfer_cb = gr.Checkbox(label='Use Upload for Style Transfer', value=False)
             init_noise_sl     = gr.Slider(0.0, 5.0, value=2.0, step=0.01, label='Init Noise Level')
 
         with gr.Column():
@@ -290,8 +287,7 @@ with gr.Blocks(title='Stable Audio Open - Inküle') as ui:
         inputs=[
             prompt_tb, neg_tb, start_sl, dur_sl,
             steps_sl, cfg_sl, samp_dd, smin_sl, smax_sl,
-            sr_dd, audio_up, style_transfer_cb,
-            init_noise_sl
+            sr_dd, audio_up, init_noise_sl
         ],
         outputs=[aud1, aud2, aud3, zip_dl, hist]
     )
