@@ -200,5 +200,16 @@ Push the image to GHCR using the docker push command.
 docker push ghcr.io/inkuele/actions-runner-controller-ghcr:latest
 ```
 
+### Automating Image Publishing with GitHub Actions
+
+The Docker image is automatically generated and therefore updated, everytime that a new commit is pushed.
+
+The configuration file is:
+```bash
+.github/workflows/docker-ghcr.yml
+```
+
+
+
 
 
