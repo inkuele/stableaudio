@@ -2,27 +2,22 @@ name: Build and Push Docker Image to GHCR
 
 on:
   push:
-    branches: [main]  # Change to your target branch if needed
+    branches: [main]
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: read
-      packages: write  # Required to push to GHCR
-      id-token: write  # Required for GitHub Actions auth
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Log in to GHCR
+      - name: Log in to GHCR with personal token
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: buscon                # <- your GitHub username
+          password: ${{ secrets.GHCR_PAT }}  # <- your saved secret
 
       - name: Build Docker image
         run: |
