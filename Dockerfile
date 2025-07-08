@@ -20,6 +20,9 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
+# copy t5 encoders
+COPY encoders/t5 /app/encoders/t5
+
 # If you're using local encoders or models, ensure they are copied above
 # and your script points to the correct paths
 
