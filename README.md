@@ -138,3 +138,67 @@ python3.8 run_gradio_offline.py
 
 Open your browser at the address printed in the console to start generating audio!
 
+
+## E. Docker version
+
+
+### Create the Docker container
+
+```bash
+docker build -t my-stableaudio-app .
+```
+
+### Run your app 
+
+```bash
+docker run --gpus all -p 7880:7880 -v $(pwd):/app my-stableaudio-app
+```
+
+- --gpus all: enables GPU access
+- -p 7880:7880: exposes the Gradio or web port (if relevant)
+- -v $(pwd):/app: mounts the current directory into the container
+
+
+### Install the NVIDIA Container Toolkit
+
+```
+https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html
+```
+
+and restart docker:
+
+```bash
+sudo systemctl restart docker
+```
+
+### Test GPU access inside Docker
+
+```bash
+docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu22.04 nvidia-smi
+```
+
+### Now run your Stable Audio app
+
+```bash
+docker run --gpus all -p 7880:7880 -v $(pwd)/models:/app/models my-stableaudio-app
+```
+
+### Pushing Docker Images to GitHub Registry(ghcr.io)
+
+Login with a github account with write access:
+```bash
+docker login --username inkuele --password your_personal_access_token ghcr.io
+```
+
+Use the docker build command to build the Docker image and tag the image with the GHCR repository URL and version
+```bash
+docker build . -t ghcr.io/inkuele/actions-runner-controller-ghcr:latest              
+```
+
+Push the image to GHCR using the docker push command.
+```bash
+docker push ghcr.io/inkuele/actions-runner-controller-ghcr:latest
+```
+
+
+
