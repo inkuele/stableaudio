@@ -295,7 +295,7 @@ with gr.Blocks(title='Stable Audio Open - Inküle') as ui:
     use3.click(lambda p: p, inputs=[aud3], outputs=[audio_up])
 
 if __name__ == '__main__':
-    local_ip = get_local_ip()
-    print(f'Serving Gradio interface on: http://{local_ip}:7880')
-    ui.queue().launch(share=False, server_name=local_ip, server_port=7880)
+    #local_ip = get_local_ip()
+    #print(f'Serving Gradio interface on: http://{local_ip}:7880')
+    ui.queue().launch(share=False, server_name="0.0.0.0")
 
