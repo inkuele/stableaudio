@@ -21,9 +21,9 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -t ghcr.io/buscon/actions-runner-controller-ghcr:latest .
+          docker build -t ghcr.io/buscon/stableaudio-open:latest .
 
       - name: Push Docker image
         run: |
-          docker push ghcr.io/buscon/actions-runner-controller-ghcr:latest
+          docker push ghcr.io/buscon/stableaudio-open:latest
 
