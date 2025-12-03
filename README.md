@@ -133,7 +133,7 @@ python3.10 download_encoders.py
 Once models and encoders are in place, run:
 
 ```bash
-python3.8 run_gradio_offline.py
+python3.10 run_gradio_offline.py
 ```
 
 Open your browser at the address printed in the console to start generating audio!
